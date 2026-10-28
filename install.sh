@@ -1,282 +1,174 @@
 #!/bin/bash
-cd "$(dirname "${BASH_SOURCE[0]}")"
-. deps/functions.sh
-XDG_DESKTOP_DIR=$(xdg-user-dir DESKTOP)
-XDG_DATA_HOME="${XDG_DATA_HOME:=${HOME}/.local/share}"
-IS_STEAMOS=$(grep -qi "SteamOS" /etc/os-release && echo true || echo false)
-STEAM_ROOT=$(readlink -f "$HOME/.steam/root")
-STEAM_BIN=steam
+# 7thDroid: installs the 7th Heaven mod manager for FINAL FANTASY VII on DroidDeck.
+# Run it as: bash install.sh   (Android shared storage is mounted noexec)
 
-echo "" > "7thDeck.log"
-exec > >(tee -ia "7thDeck.log") 2>&1
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+LIB_DIR=$ROOT_DIR/lib
+ASSETS_DIR=$ROOT_DIR/assets
 
-echo "########################################################################"
-echo "#                            7thDeck v2.5.3                            #"
-echo "########################################################################"
-echo "#    This script will:                                                 #"
-echo "#   1. Apply patches to FF7's proton prefix to accomodate 7th Heaven   #"
-echo "#   2. Install 7th Heaven to a folder of your choosing                 #"
-echo "#   3. Add 7th Heaven to Steam using a custom launcher script          #"
-echo "#   4. Add a custom controller config for Steam Deck, to allow mouse   #"
-echo "#      control with trackpad without holding down the STEAM button     #"
-echo "########################################################################"
-echo "#           For support, please open an issue on GitHub,               #"
-echo "#      or ask in the #ff7-linux channel of the Tsunamods Discord       #"
-echo "########################################################################"
-echo -e "\n"
+# shellcheck source=lib/common.sh
+. "$LIB_DIR/common.sh"
+# shellcheck source=lib/droiddeck.sh
+. "$LIB_DIR/droiddeck.sh"
+# shellcheck source=lib/sources.sh
+. "$LIB_DIR/sources.sh"
+# shellcheck source=lib/game_import.sh
+. "$LIB_DIR/game_import.sh"
+# shellcheck source=lib/prefix.sh
+. "$LIB_DIR/prefix.sh"
+# shellcheck source=lib/seventh_heaven.sh
+. "$LIB_DIR/seventh_heaven.sh"
+# shellcheck source=lib/shortcuts.sh
+. "$LIB_DIR/shortcuts.sh"
 
-# Handle Flatpak Steam
-if grep -q Steam <(flatpak list --app) && ! command -v steam &> /dev/null; then
-  echo "Using Flatpak Steam." &>> "7thDeck.log"
-  STEAM_ROOT="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
-  STEAM_BIN="flatpak run com.valvesoftware.Steam"
-elif grep -q Steam <(flatpak list --app) && command -v steam &> /dev/null; then
-  echo "Both Flatpak and native Steam installations have been detected."
-  echo "Press 1 to use Flatpak Steam."
-  echo "Press 2 to use native Steam."
-  while true; do
-      read -p "" input
-      if [[ $input != "1" && $input != "2" ]]; then
-          continue
-      fi
-      case $input in
-          1)
-              echo "Proceeding with Flatpak Steam installation"
-              STEAM_ROOT="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
-              STEAM_BIN="flatpak run com.valvesoftware.Steam"
-              break;;
-          2)
-              echo "Proceeding with native Steam installation."
-              break;;
-          *)
-              continue;;
-      esac
-  done
-fi
+usage() {
+  cat <<EOF
+Usage: bash install.sh [options]
 
-# Check for Proton
-while true; do
-  if ! pgrep steam > /dev/null; then nohup $STEAM_BIN &> /dev/null & disown; fi
-  while ! pgrep steam > /dev/null; do sleep 1; done
-  echo -n "Checking if Proton 9 is installed... "
-  PROTON=$(LIBRARY=$(steam_library "$STEAM_ROOT" 2805730) && [ -n "$LIBRARY" ] && echo "$LIBRARY/steamapps/common/Proton 9.0 (Beta)/proton")
-  if [ -z "$PROTON" ]; then
-    echo -e "\nNot found! Launching Steam to install."
-    nohup $STEAM_BIN steam://install/2805730 &> /dev/null &
-    read -p "Press Enter when Proton 9 is done installing."
-    killall -9 steam
-    while pgrep steam >/dev/null; do sleep 1; done
-    rm $STEAM_ROOT/steamapps/libraryfolders.vdf &>> "7thDeck.log"
-    rm $STEAM_ROOT/config/libraryfolders.vdf &>> "7thDeck.log"
-  else
-    echo "OK!"
-    echo "Found Proton at $PROTON!"
-    echo
-    break
-  fi
-done
+  --version pinned|latest|canary   7th Heaven build (asked when not given; pinned is $SEVENTH_PINNED_TAG)
+  --source PATH                    Use this game instead of searching: an installed FF7 folder, a GOG
+                                   installer, CD images (.iso) or disc folders. Repeat for several discs.
+  --game-dir DIR                   Where a GOG installer puts the game (default ~/Games/FINAL FANTASY VII)
+  --app-entry / --no-app-entry     Add (or skip) the DroidDeck app Desktop page entry
+  --steam / --no-steam             Add (or skip) the Steam non-Steam-game shortcut
+  --desktop / --no-desktop         Add (or skip) the KDE menu entry
+  --shortcuts-only                 Only (re)create the launcher and shortcuts for the last install
+  --winetricks-dinput              Also run winetricks' dinput verb, when a Proton with protonfixes exists
+  --reinstall                      Run every step again, even ones that look done
+  --yes                            Accept every default without asking
+  --dry-run                        Print what would run without changing anything
+  -h, --help                       Show this help
+EOF
+}
 
-# Check for SteamLinuxRuntime
-while true; do
-  if ! pgrep steam > /dev/null; then nohup $STEAM_BIN &> /dev/null; fi
-  while ! pgrep steam > /dev/null; do sleep 1; done
-  echo -n "Checking if Steam Linux Runtime is installed... "
-  LIBRARY=$(steam_library "$STEAM_ROOT" 1628350)
-  if [ -n "$LIBRARY" ]; then
-    for path in \
-      "$LIBRARY/steamapps/common/SteamLinuxRuntime_sniper/run" \
-      "$LIBRARY/steamapps/common/SteamLinuxRuntime_sniper-arm64/run"
-    do
-      [ -f "$path" ] && RUNTIME="$path" && break
-    done
-  fi
-  if [ -z "$RUNTIME" ]; then
-    echo -e "\nNot found! Launching Steam to install."
-    nohup $STEAM_BIN steam://install/1628350 &> /dev/null &
-    read -p "Press Enter when Steam Linux Runtime 3.0 (sniper) is done installing."
-    killall -9 steam
-    while pgrep steam >/dev/null; do sleep 1; done
-    rm $STEAM_ROOT/steamapps/libraryfolders.vdf &>> "7thDeck.log"
-    rm $STEAM_ROOT/config/libraryfolders.vdf &>> "7thDeck.log"
-  else
-    echo "OK!"
-    echo "Found SLR at $RUNTIME!"
-    echo
-    break
-  fi
-done
+SEVENTH_CHANNEL='' SOURCES=() GAME_DIR='' REINSTALL=0 SHORTCUTS_ONLY=0 WINETRICKS_DINPUT=0
+WANT_APP_ENTRY='' WANT_STEAM='' WANT_DESKTOP=''
+CD_DISCS=() CD_DRIVES=()
 
-# Check for FF7 and set paths
-while true; do
-  if ! pgrep steam > /dev/null; then nohup $STEAM_BIN &> /dev/null; fi
-  while ! pgrep steam > /dev/null; do sleep 1; done
-  echo -n "Checking if FF7 is installed... "
-  FF7_LIBRARY=$(steam_library "$STEAM_ROOT" 39140)
-  if [ -z "$FF7_LIBRARY" ]; then
-    echo -e "\nNot found! Launching Steam to install."
-    nohup $STEAM_BIN steam://install/39140 &> /dev/null &
-    read -p "Press Enter when FINAL FANTASY VII is done installing."
-    killall -9 steam
-    while pgrep steam > /dev/null; do sleep 1; done
-    rm $STEAM_ROOT/steamapps/libraryfolders.vdf &>> "7thDeck.log"
-    rm $STEAM_ROOT/config/libraryfolders.vdf &>> "7thDeck.log"
-  else
-    echo "OK!"
-    echo "Found FF7 at $FF7_LIBRARY!"
-    echo
-    break
-  fi
-done
-
-# Set paths and compat_mounts after libraries have been properly detected
-FF7_DIR="$FF7_LIBRARY/steamapps/common/FINAL FANTASY VII"
-WINEPATH="$FF7_LIBRARY/steamapps/compatdata/39140/pfx"
-[ $IS_STEAMOS = true ] && WINEPATH="${HOME}/.steam/steam/steamapps/compatdata/39140/pfx"
-export STEAM_COMPAT_MOUNTS="$(steam_library "$STEAM_ROOT" 2805730):$(steam_library "$STEAM_ROOT" 1628350):$(steam_library "$STEAM_ROOT" 39140)"
-
-# Force FF7 under Proton 9
-echo "Rebuilding Final Fantasy VII under Proton 9..."
-while pidof "steam" > /dev/null; do
-  killall -9 steam &>> "7thDeck.log"
-  sleep 1
-done
-cp $STEAM_ROOT/config/config.vdf $STEAM_ROOT/config/config.vdf.bak
-perl -0777 -i -pe 's/"CompatToolMapping"\n\s+{/"CompatToolMapping"\n\t\t\t\t{\n\t\t\t\t\t"39140"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"proton_9"\n\t\t\t\t\t\t"config"\t\t""\n\t\t\t\t\t\t"priority"\t\t"250"\n\t\t\t\t\t}/gs' \
-$STEAM_ROOT/config/config.vdf
-[ "${WINEPATH}" = */compatdata/39140/pfx ] && rm -rf "${WINEPATH%/pfx}"/*
-echo "Sign into the Steam account that owns FF7 if prompted."
-nohup $STEAM_BIN steam://rungameid/39140 &> /dev/null &
-echo "Waiting for Steam... If nothing happens here, launch FF7 via Steam."
-while ! pgrep "FF7_Launcher" > /dev/null; do sleep 1; done
-killall -9 "FF7_Launcher.exe"
-echo
-
-# Fix infinite loop on "Verifying installed game is compatible"
-[ -L "$FF7_DIR/FINAL FANTASY VII" ] && unlink "$FF7_DIR/FINAL FANTASY VII"
-
-# Ask for install path
-echo "Waiting for you to select an installation path..."
-prompt_message "Choose an installation path for 7th Heaven. The folder must already exist."
-while true; do
-  INSTALL_PATH=$(prompt_destination "Select 7th Heaven Install Folder") || { echo "No directory selected. Exiting."; exit 1; }
-  prompt_confirm "7th Heaven will be installed to $INSTALL_PATH. Continue?"
-  case $? in
-    0) echo "Installing to $INSTALL_PATH."; break ;;
-    1) echo "Select a different path." ;;
-    -1) echo "An unexpected error has occurred. Exiting"; exit 1 ;;
+# shellcheck disable=SC2034 # WANT_* are read by name in want_entry
+while [ $# -gt 0 ]; do
+  case $1 in
+    --version) SEVENTH_CHANNEL=${2:?--version needs a value}; shift ;;
+    --version=*) SEVENTH_CHANNEL=${1#*=} ;;
+    --source) SOURCES+=("${2:?--source needs a path}"); shift ;;
+    --source=*) SOURCES+=("${1#*=}") ;;
+    --game-dir) GAME_DIR=${2:?--game-dir needs a path}; shift ;;
+    --game-dir=*) GAME_DIR=${1#*=} ;;
+    --app-entry) WANT_APP_ENTRY=1 ;;
+    --no-app-entry) WANT_APP_ENTRY=0 ;;
+    --steam) WANT_STEAM=1 ;;
+    --no-steam) WANT_STEAM=0 ;;
+    --desktop) WANT_DESKTOP=1 ;;
+    --no-desktop) WANT_DESKTOP=0 ;;
+    --shortcuts-only) SHORTCUTS_ONLY=1 ;;
+    --winetricks-dinput) WINETRICKS_DINPUT=1 ;;
+    --reinstall) REINSTALL=1 ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "Unknown option $1" ;;
   esac
+  shift
 done
-echo
 
-# Download 7th Heaven from Github
-echo "Downloading 7th Heaven..."
-download_dependency "tsunamods-codes/7th-Heaven" "*.exe" SEVENTH_INSTALLER
-echo
+start_log
+printf '%s%s%s - 7th Heaven for FINAL FANTASY VII on DroidDeck\n' "$C_BOLD" "$APP_NAME" "$C_RESET"
+info "Log: $LOG_FILE"
+[ "$DRY_RUN" = 1 ] && info "Dry run: nothing will be changed."
 
-# Install 7th Heaven using EXE
-echo "Installing 7th Heaven..."
-mkdir -p "${WINEPATH}/drive_c/ProgramData" # fix vcredist install - infirit
-STEAM_COMPAT_APP_ID=39140 STEAM_COMPAT_DATA_PATH="${WINEPATH%/pfx}" \
-STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT" \
-"$RUNTIME" -- "$PROTON" waitforexitandrun \
-"$SEVENTH_INSTALLER" /VERYSILENT /DIR="Z:$INSTALL_PATH" /LOG="7thHeaven.log" &>> "7thDeck.log"
-echo
+step "Checking the environment"
+preflight
 
-# Tweaks to 7th Heaven install directory
-echo "Applying patches to 7th Heaven..."
-mkdir -p "$INSTALL_PATH/7thWorkshop/profiles"
-cp -f "$INSTALL_PATH/Resources/FF7_1.02_Eng_Patch/ff7.exe" "$FF7_DIR/ff7.exe"
-cp -f "deps/7th Heaven.sh" "$INSTALL_PATH/"
-cp -f "deps/functions.sh" "$INSTALL_PATH/"
-cp -f "deps/dxvk.conf" "$INSTALL_PATH/"
-cp -f deps/settings.xml "$INSTALL_PATH/7thWorkshop/"
-[ ! -f "$INSTALL_PATH/7thWorkshop/profiles/Default.xml" ] && cp "deps/Default.xml" "$INSTALL_PATH/7thWorkshop/profiles/" &>> "7thDeck.log"
-sed -i "s|@STEAM_ROOT@|$STEAM_ROOT|" "$INSTALL_PATH/7th Heaven.sh"
-sed -i "s|@STEAMOS@|$IS_STEAMOS|" "$INSTALL_PATH/7th Heaven.sh"
-sed -i "s|<LibraryLocation>REPLACE_ME</LibraryLocation>|<LibraryLocation>Z:$INSTALL_PATH/mods</LibraryLocation>|" "$INSTALL_PATH/7thWorkshop/settings.xml"
-sed -i "s|<FF7Exe>REPLACE_ME</FF7Exe>|<FF7Exe>Z:$FF7_DIR/ff7.exe</FF7Exe>|" "$INSTALL_PATH/7thWorkshop/settings.xml"
-echo
-
-# Tweaks to game
-echo "Applying patches to FF7..."
-cp -f "deps/timeout.exe" "$WINEPATH/drive_c/windows/system32/"
-echo "FF7DISC1" > "$WINEPATH/drive_c/.windows-label"
-echo "44000000" > "$WINEPATH/drive_c/.windows-serial"
-[ ! -d "$FF7_DIR/music/vgmstream" ] && mkdir -p "$FF7_DIR/music/vgmstream"
-[ -d "$FF7_DIR/data/music_ogg" ] && cp "$FF7_DIR/data/music_ogg/"* "$FF7_DIR/music/vgmstream/"
-if [ -d "$FF7_DIR/data/lang-en" ]; then
-  files=(
-    "battle/camdat0.bin"
-    "battle/camdat1.bin"
-    "battle/camdat2.bin"
-    "battle/co.bin"
-    "battle/scene.bin"
-    "kernel/KERNEL.BIN"
-    "kernel/kernel2.bin"
-    "kernel/WINDOW.BIN"
-  )
-  for file in "${files[@]}"; do
-    ln -fs "$FF7_DIR/data/lang-en/$file" "$FF7_DIR/data/$file"
-  done
+if [ "$SHORTCUTS_ONLY" = 1 ]; then
+  load_state || die "No earlier install found ($STATE_FILE). Run the full installer first."
+  check_compatdata "$COMPATDATA"
+  write_launcher "$(seventh_exe "$COMPATDATA")"
+  offer_shortcuts
+  exit 0
 fi
-echo
 
-# SteamOS only
-if [ $IS_STEAMOS = true ]; then
-  # Steam Deck Auto-Config (mod)
-  mkdir -p "$INSTALL_PATH/mods"
-  cp -rf deps/SteamDeckSettings "$INSTALL_PATH/mods/"
+ensure_proton
 
-  # This allows moving and clicking the mouse by using the right track-pad without holding down the STEAM button
-  echo "Adding controller config..."
-  cp -f deps/controller_neptune_gamepad+mouse+click.vdf $STEAM_ROOT/controller_base/templates/controller_neptune_gamepad+mouse+click.vdf
-  for CONTROLLERCONFIG in $STEAM_ROOT/steamapps/common/Steam\ Controller\ Configs/*/config/configset_controller_neptune.vdf ; do
-    if grep -q "\"39140\"" "$CONTROLLERCONFIG"; then
-      perl -0777 -i -pe 's/"39140"\n\s+\{\n\s+"template"\s+"controller_neptune_gamepad_fps.vdf"\n\s+\}/"39140"\n\t\{\n\t\t"template"\t\t"controller_neptune_gamepad+mouse+click.vdf"\n\t\}\n\t"7th heaven"\n\t\{\n\t\t"template"\t\t"controller_neptune_gamepad+mouse+click.vdf"\n\t\}/gs' "$CONTROLLERCONFIG"
+step "Finding FINAL FANTASY VII"
+APPID='' COMPATDATA=''
+if [ ${#SOURCES[@]} -gt 0 ]; then
+  manual_source "${SOURCES[@]}"
+else
+  mapfile -t FOUND < <(detect_all)
+  if [ ${#FOUND[@]} -eq 0 ]; then
+    manual_source
+  else
+    labels=()
+    for line in "${FOUND[@]}"; do labels+=("$(cut -f5 <<< "$line")"); done
+    labels+=("Somewhere else (enter a path)")
+    choose pick "Which copy of FINAL FANTASY VII should 7th Heaven use?" "${labels[@]}"
+    if [ "$pick" -eq ${#FOUND[@]} ]; then
+      manual_source
     else
-      perl -0777 -i -pe 's/"controller_config"\n\{/"controller_config"\n\{\n\t"39140"\n\t\{\n\t\t"template"\t"controller_neptune_gamepad+mouse+click.vdf"\n\t\}\n\t"7th heaven"\n\t\{\n\t\t"template"\t"controller_neptune_gamepad+mouse+click.vdf"\n\t\}/' "$CONTROLLERCONFIG"
+      IFS=$'\t' read -r SOURCE_KIND APPID GAME_DIR COMPATDATA _ <<< "${FOUND[$pick]}"
+      GAME_EXE=$(find_game_exe "$GAME_DIR")
+      [ -n "$GAME_EXE" ] || die "No FF7 executable found in $GAME_DIR. Is the game fully installed?"
     fi
+  fi
+fi
+if [ "$SOURCE_KIND" = gog-setup ]; then
+  APPID=$FF7_GOG
+  unpack_gog_setup || true
+fi
+case $SOURCE_KIND in
+  steam|folder|gog) ok "Game: $GAME_EXE" ;;
+  gog-setup) ok "Game: GOG installer ${GOG_SETUP##*/}, installing to $GAME_DIR" ;;
+  cd) ok "Game: 1998 CD-ROM release, ${#CD_DISCS[@]} disc(s)" ;;
+esac
+
+step "Choosing the Proton prefix"
+if [ "$SOURCE_KIND" = steam ]; then
+  info "Using the Steam prefix of FF7: $COMPATDATA"
+  while [ ! -f "$COMPATDATA/pfx/system.reg" ]; do
+    [ "$DRY_RUN" = 1 ] && break
+    warn "Steam has not created FF7's prefix yet."
+    [ "$ASSUME_YES" = 1 ] && die "Start FINAL FANTASY VII once from Steam, quit it, then run this again."
+    pause "Start FINAL FANTASY VII once from Steam, then quit the game."
   done
-  echo
+else
+  COMPATDATA=$(compatdata_for "$(dedicated_prefix_id)") || exit 1
+  info "Using a prefix of its own: $COMPATDATA"
 fi
 
-# Add shortcut to Desktop/Launcher
-echo "Adding 7th Heaven to Desktop and Launcher..."
-xdg-icon-resource install deps/7th-heaven.png --size 64 --novendor
-mkdir -p "${XDG_DATA_HOME}/applications" &>> "7thDeck.log"
-# Launcher
-rm -r "${XDG_DATA_HOME}/applications/7th Heaven.desktop" 2> /dev/null
-echo "#!/usr/bin/env xdg-open
-[Desktop Entry]
-Name=7th Heaven
-Icon=7th-heaven
-Exec=\"$INSTALL_PATH/7th Heaven.sh\"
-Path=$INSTALL_PATH
-Categories=Game;
-Terminal=false
-Type=Application
-StartupNotify=false" > "${XDG_DATA_HOME}/applications/7th Heaven.desktop"
-chmod +x "${XDG_DATA_HOME}/applications/7th Heaven.desktop"
-# Desktop
-rm -r "${XDG_DESKTOP_DIR}/7th Heaven.desktop" 2> /dev/null
-echo "#!/usr/bin/env xdg-open
-[Desktop Entry]
-Name=7th Heaven
-Icon=7th-heaven
-Exec=\"$INSTALL_PATH/7th Heaven.sh\"
-Path=$INSTALL_PATH
-Categories=Game;
-Terminal=false
-Type=Application
-StartupNotify=false" > "${XDG_DESKTOP_DIR}/7th Heaven.desktop"
-chmod +x "${XDG_DESKTOP_DIR}/7th Heaven.desktop"
-update-desktop-database ${XDG_DATA_HOME}/applications &>> "7thDeck.log"
-echo
+select_seventh_heaven
 
-# Add launcher to Steam
-echo "Adding 7th Heaven to Steam..."
-deps/steamos-add-to-steam "${INSTALL_PATH}/7th Heaven.sh" "$STEAM_BIN" &>> "7thDeck.log"
-sleep 5
-echo
+check_compatdata "$COMPATDATA"
 
-echo -e "All done!\nYou can close this window and launch 7th Heaven from Steam or the desktop now."
+step "Preparing the prefix"
+dotnet_version=$(seventh_dotnet_version)
+info "7th Heaven $SEVENTH_TAG needs the .NET Desktop Runtime ${dotnet_version%.*} (installing $dotnet_version)"
+install_dotnet "$COMPATDATA" "$dotnet_version"
+[ "$DRY_RUN" = 1 ] || [ -f "$COMPATDATA/pfx/user.reg" ] || die "The prefix was not created. See $LOG_FILE."
+[ "$SOURCE_KIND" = cd ] && map_cd_drives "$COMPATDATA"
+apply_registry "$COMPATDATA"
+[ "$WINETRICKS_DINPUT" = 1 ] && winetricks_dinput "$COMPATDATA"
+
+if [ "$SOURCE_KIND" = gog-setup ] || [ "$SOURCE_KIND" = cd ]; then
+  step "Installing FINAL FANTASY VII"
+  install_pending_game "$COMPATDATA"
+fi
+prefix_extras "$COMPATDATA" "$APPID"
+
+step "Installing 7th Heaven"
+install_seventh_heaven "$COMPATDATA"
+FF7_VERSION=$(ff7_version_for "$APPID" "$GAME_EXE")
+if [ -z "$FF7_VERSION" ]; then
+  choose pick "Which release of FF7 is in $GAME_DIR?" "GOG" "Steam (2026 release)"
+  [ "$pick" = 0 ] && FF7_VERSION=GOG || FF7_VERSION=SteamReRelease
+fi
+configure_seventh_heaven "$COMPATDATA" "$GAME_EXE" "$FF7_VERSION"
+
+write_launcher "$(seventh_exe "$COMPATDATA")"
+[ "$DRY_RUN" = 1 ] || save_state SOURCE_KIND APPID GAME_DIR GAME_EXE COMPATDATA FF7_VERSION SEVENTH_CHANNEL SEVENTH_TAG
+offer_shortcuts
+
+step "Done"
+ok "7th Heaven $SEVENTH_TAG is installed for $FF7_VERSION FINAL FANTASY VII."
+info "Start it with: bash \"$LAUNCHER\" (or the shortcuts you added)."
+info "Prefix: $COMPATDATA"
+info "Log: $LOG_FILE"

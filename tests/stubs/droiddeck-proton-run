@@ -1,0 +1,39 @@
+#!/bin/bash
+# Test stand-in for DroidDeck's droiddeck-proton-run: records the call and fakes what installers leave behind.
+verb=waitforexitandrun prefix=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --verb) verb=$2; shift 2 ;;
+    --prefix) prefix=$2; shift 2 ;;
+    --*) shift ;;
+    *) break ;;
+  esac
+done
+program=$1
+shift
+root=${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$STEAM_ROOT}
+if [ -n "$prefix" ]; then
+  compatdata=$root/steamapps/compatdata/$prefix
+else
+  case $program in
+    */pfx/*) compatdata=${program%%/pfx/*} ;;
+    *) compatdata=$root/steamapps/compatdata/own ;;
+  esac
+fi
+[ -f "$program" ] || { echo "stub: $program does not exist" >&2; exit 2; }
+printf '%s\t%s\t%s\t%s\t%s\n' "$verb" "${compatdata##*/}" "${program##*/}" "${FEX_X87REDUCEDPRECISION:-unset}" "$*" >> "$STUB_LOG"
+pfx=$compatdata/pfx
+mkdir -p "$pfx/drive_c/windows/system32" "$pfx/drive_c/windows/syswow64" "$pfx/drive_c/users/steamuser/Documents" "$pfx/dosdevices"
+[ -f "$pfx/user.reg" ] || printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n\n#arch=win64\n\n[Software\\\\Wine] 1700000000\n#time=1\n"Version"="win10"\n' > "$pfx/user.reg"
+[ -f "$pfx/system.reg" ] || printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\Machine\n\n#arch=win64\n' > "$pfx/system.reg"
+case ${program##*/} in
+  windowsdesktop-runtime-*-win-x64.exe) v=${program##*runtime-}; mkdir -p "$pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/${v%%-win*}" ;;
+  windowsdesktop-runtime-*-win-x86.exe) v=${program##*runtime-}; mkdir -p "$pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/${v%%-win*}" ;;
+  7thHeaven*.exe) mkdir -p "$pfx/drive_c/7th Heaven" && touch "$pfx/drive_c/7th Heaven/7th Heaven.exe" ;;
+  setup_final_fantasy_vii*.exe)
+    dir=$(printf '%s\n' "$@" | sed -n 's|^/DIR=Z:||p' | sed 's|\\|/|g')
+    mkdir -p "$dir" && touch "$dir/FFVII.exe" ;;
+  [Ss][Ee][Tt][Uu][Pp].[Ee][Xx][Ee])
+    mkdir -p "$pfx/drive_c/Program Files (x86)/Square Soft, Inc/Final Fantasy VII" && touch "$pfx/drive_c/Program Files (x86)/Square Soft, Inc/Final Fantasy VII/ff7.exe" ;;
+esac
+exit 0
