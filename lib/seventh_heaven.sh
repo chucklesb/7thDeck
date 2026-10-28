@@ -44,35 +44,49 @@ if exes:
   SEVENTH_INSTALLER=$(download "$SEVENTH_URL" "$SEVENTH_FILE")
 }
 
-# The Windows Desktop runtime the chosen build needs, read from its runtimeconfig.json without
-# running the installer -> MAJOR.MINOR.PATCH
-seventh_dotnet_version() {
-  local channel="" tmp path version
+# The .NET Desktop channel each build is known to need. innoextract can't read 7th Heaven's
+# installers (Inno Setup 6.5; DroidDeck's innoextract stops at 6.1), and builds other than the pinned
+# one may change it, so check_seventh_dotnet confirms it from the installed app afterwards.
+SEVENTH_PINNED_DOTNET=9.0
+SEVENTH_CANARY_DOTNET=10.0
+
+# The .NET Desktop channel the chosen build needs, without running its installer -> MAJOR.MINOR
+seventh_dotnet_channel() {
+  local tmp path channel=''
   if [ "$HAVE_INNOEXTRACT" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     tmp=$(mktemp -d)
     path=$("$INNOEXTRACT" -l "$SEVENTH_INSTALLER" 2>/dev/null | grep -io '"[^"]*7th heaven\.runtimeconfig\.json"' | head -n1 | tr -d '"')
     if [ -n "$path" ] && "$INNOEXTRACT" -s -d "$tmp" -I "$path" "$SEVENTH_INSTALLER" >/dev/null 2>&1; then
-      channel=$(find "$tmp" -iname '*.runtimeconfig.json' -exec cat {} + | python -c '
-import json, sys
-config = json.load(sys.stdin).get("runtimeOptions", {})
-for fw in config.get("frameworks", []) + [config.get("framework", {})]:
-    if fw.get("name") == "Microsoft.WindowsDesktop.App":
-        print(".".join(fw["version"].split(".")[:2]))
-        break
-' 2>/dev/null)
+      channel=$(runtimeconfig_channel "$(find "$tmp" -iname '*.runtimeconfig.json' | head -n1)")
     fi
-    rm -rf "$tmp"
+    rm -rf -- "$tmp"
   fi
   if [ -z "$channel" ]; then
-    debug "runtimeconfig probe found nothing; using .NET $DOTNET_FALLBACK"
-    echo "$DOTNET_FALLBACK"
-    return
+    case $SEVENTH_CHANNEL in
+      canary) channel=$SEVENTH_CANARY_DOTNET ;;
+      latest) [ "$SEVENTH_TAG" = "$SEVENTH_PINNED_TAG" ] && channel=$SEVENTH_PINNED_DOTNET || channel=$SEVENTH_CANARY_DOTNET ;;
+      *) channel=$SEVENTH_PINNED_DOTNET ;;
+    esac
+    debug "7th Heaven $SEVENTH_TAG: .NET $channel from the known-build table"
   fi
-  version=$(dotnet_latest_patch "$channel")
-  if [ -z "$version" ]; then
-    [ "${DOTNET_FALLBACK%.*}" = "$channel" ] && version=$DOTNET_FALLBACK || version=$channel.0
+  echo "$channel"
+}
+
+# check_seventh_dotnet COMPATDATA - read what the installed 7th Heaven asks for, and install it if it
+# differs from what was installed before it.
+check_seventh_dotnet() {
+  local compatdata=$1 config channel
+  [ "$DRY_RUN" = 1 ] && return 0
+  config=$(find "$compatdata/pfx/drive_c/7th Heaven" -maxdepth 1 -iname '7th heaven.runtimeconfig.json' | head -n1)
+  [ -n "$config" ] || { warn "7th Heaven has no runtimeconfig.json; could not confirm its .NET version."; return 0; }
+  channel=$(runtimeconfig_channel "$config")
+  [ -n "$channel" ] || { warn "Could not read the .NET version from $config."; return 0; }
+  if dotnet_installed "$compatdata" x64 "$channel" && dotnet_installed "$compatdata" x86 "$channel"; then
+    ok "7th Heaven $SEVENTH_TAG runs on .NET Desktop $channel, which is installed."
+    return 0
   fi
-  echo "$version"
+  info "7th Heaven $SEVENTH_TAG asks for .NET Desktop $channel."
+  install_dotnet "$compatdata" "$channel"
 }
 
 seventh_exe() { printf '%s\n' "$1/pfx/drive_c/7th Heaven/7th Heaven.exe"; }

@@ -21,7 +21,7 @@ Valve's ARM64 Proton and FEX.
    - The game files stay where they are; 7th Heaven reaches them through Wine's `Z:` drive, which is the whole Linux file system.
    - No other prefix is touched, including the one Steam made for FF7, so vanilla FF7 from Steam keeps working as before.
    - If DroidDeck-Proton isn't your default Proton, 7thDroid sets it for its own prefix only, the same way picking a game's Proton in the DroidDeck app does.
-   - It installs the .NET Desktop Runtime that 7th Heaven needs, both x64 and x86.
+   - It installs the .NET Desktop Runtime that 7th Heaven needs, both x64 and x86: .NET 9 for the pinned 4.5.2, .NET 10 for current canary builds. After 7th Heaven is installed, it reads the version the app itself asks for and installs that too if it differs.
    - It turns off WinForms/WPF hardware acceleration, because 7th Heaven's controls vanish without that.
    - It makes Wine prefer 7th Heaven's `dinput.dll`. Without that, mods silently don't load.
 3. **Installs 7th Heaven** silently into `C:\7th Heaven` in that prefix, then points it at your game.

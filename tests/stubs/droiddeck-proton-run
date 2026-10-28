@@ -29,7 +29,10 @@ mkdir -p "$pfx/drive_c/windows/system32" "$pfx/drive_c/windows/syswow64" "$pfx/d
 case ${program##*/} in
   windowsdesktop-runtime-*-win-x64.exe) v=${program##*runtime-}; mkdir -p "$pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/${v%%-win*}" ;;
   windowsdesktop-runtime-*-win-x86.exe) v=${program##*runtime-}; mkdir -p "$pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/${v%%-win*}" ;;
-  7thHeaven*.exe) mkdir -p "$pfx/drive_c/7th Heaven" && touch "$pfx/drive_c/7th Heaven/7th Heaven.exe" ;;
+  7thHeaven*.exe)
+    mkdir -p "$pfx/drive_c/7th Heaven" && touch "$pfx/drive_c/7th Heaven/7th Heaven.exe"
+    printf '{"runtimeOptions":{"tfm":"net9.0-windows","frameworks":[{"name":"Microsoft.NETCore.App","version":"%s"},{"name":"Microsoft.WindowsDesktop.App","version":"%s"}]}}\n' \
+      "${STUB_7H_DOTNET:-9.0.0}" "${STUB_7H_DOTNET:-9.0.0}" > "$pfx/drive_c/7th Heaven/7th Heaven.runtimeconfig.json" ;;
   setup_final_fantasy_vii*.exe)
     dir=$(printf '%s\n' "$@" | sed -n 's|^/DIR=Z:||p' | sed 's|\\|/|g')
     mkdir -p "$dir" && touch "$dir/FFVII.exe" ;;

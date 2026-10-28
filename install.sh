@@ -141,9 +141,9 @@ select_seventh_heaven
 check_compatdata "$COMPATDATA"
 
 step "Preparing the prefix"
-dotnet_version=$(seventh_dotnet_version)
-info "7th Heaven $SEVENTH_TAG needs the .NET Desktop Runtime ${dotnet_version%.*} (installing $dotnet_version)"
-install_dotnet "$COMPATDATA" "$dotnet_version"
+dotnet_channel=$(seventh_dotnet_channel)
+info "7th Heaven $SEVENTH_TAG needs the .NET Desktop Runtime $dotnet_channel"
+install_dotnet "$COMPATDATA" "$dotnet_channel"
 [ "$DRY_RUN" = 1 ] || [ -f "$COMPATDATA/pfx/user.reg" ] || die "The prefix was not created. See $LOG_FILE."
 [ "$SOURCE_KIND" = cd ] && map_cd_drives "$COMPATDATA"
 apply_registry "$COMPATDATA"
@@ -157,6 +157,7 @@ prefix_extras "$COMPATDATA" "$APPID"
 
 step "Installing 7th Heaven"
 install_seventh_heaven "$COMPATDATA"
+check_seventh_dotnet "$COMPATDATA"
 FF7_VERSION=$(ff7_version_for "$APPID" "$GAME_EXE")
 if [ -z "$FF7_VERSION" ]; then
   choose pick "Which release of FF7 is in $GAME_DIR?" "GOG" "Steam (2026 release)"

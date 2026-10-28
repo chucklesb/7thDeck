@@ -1,8 +1,11 @@
 # shellcheck shell=bash
 # Preparing the Proton prefix: .NET Desktop runtimes, registry fixes and the small files FF7 expects.
 
-DOTNET_FALLBACK=10.0.14
 DOTNET_BUILDS=https://builds.dotnet.microsoft.com/dotnet
+# Where the release metadata comes from: Microsoft's download site, else the same files on GitHub.
+DOTNET_METADATA=${DOTNET_METADATA:-"$DOTNET_BUILDS/release-metadata https://raw.githubusercontent.com/dotnet/core/main/release-notes"}
+# Patches known to exist, for when neither metadata source can be reached.
+declare -A DOTNET_KNOWN=([9.0]=9.0.22 [10.0]=10.0.14)
 LIB_DIR=${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 
 # dotnet_installed COMPATDATA x64|x86 MAJOR.MINOR
@@ -12,27 +15,48 @@ dotnet_installed() {
   compgen -G "$drive/$folder/dotnet/shared/Microsoft.WindowsDesktop.App/$3.*" >/dev/null
 }
 
-# The newest Windows Desktop runtime of a MAJOR.MINOR channel, from Microsoft's release metadata.
-dotnet_latest_patch() {
-  curl -fsSL --retry 3 "$DOTNET_BUILDS/release-metadata/$1/releases.json" 2>/dev/null | python -c '
+# dotnet_version MAJOR.MINOR -> the newest Windows Desktop runtime of that channel
+dotnet_version() {
+  local channel=$1 base version
+  for base in $DOTNET_METADATA; do
+    version=$(curl -fsSL --retry 2 --max-time 60 "$base/$channel/releases.json" 2>/dev/null | python -c '
 import json, sys
-data = json.load(sys.stdin)
-for release in data.get("releases", []):
+for release in json.load(sys.stdin).get("releases", []):
     desktop = release.get("windowsdesktop") or {}
     if desktop.get("version") and "-" not in desktop["version"]:
         print(desktop["version"])
         break
-'
+' 2>/dev/null)
+    [ -n "$version" ] && { echo "$version"; return; }
+  done
+  version=${DOTNET_KNOWN[$channel]:-}
+  [ -n "$version" ] || die "Could not look up the newest .NET $channel release. Check the internet connection and try again."
+  debug ".NET release metadata unreachable; using known version $version"
+  echo "$version"
 }
 
+# runtimeconfig_channel FILE -> MAJOR.MINOR of the Windows Desktop runtime a .NET app needs
+runtimeconfig_channel() {
+  python - "$1" <<'EOF' 2>/dev/null
+import json, sys
+with open(sys.argv[1], encoding="utf-8-sig") as f:
+    options = json.load(f).get("runtimeOptions", {})
+for fw in options.get("frameworks", []) + [options.get("framework") or {}]:
+    if fw.get("name") == "Microsoft.WindowsDesktop.App" and fw.get("version"):
+        print(".".join(fw["version"].split(".")[:2]))
+        break
+EOF
+}
+
+# install_dotnet COMPATDATA MAJOR.MINOR - the newest runtime of that channel, x64 and x86
 install_dotnet() {
-  local compatdata=$1 version=$2 channel arch file
-  channel=${version%.*}
+  local compatdata=$1 channel=$2 version='' arch file
   for arch in x64 x86; do
     if dotnet_installed "$compatdata" "$arch" "$channel" && [ "$REINSTALL" != 1 ]; then
       ok ".NET Desktop Runtime $channel ($arch) is already installed."
       continue
     fi
+    [ -n "$version" ] || version=$(dotnet_version "$channel") || exit 1
     file=$(download "$DOTNET_BUILDS/WindowsDesktop/$version/windowsdesktop-runtime-$version-win-$arch.exe")
     info "Installing .NET Desktop Runtime $version ($arch)"
     fex_run "$compatdata" "$file" /install /quiet /norestart || warn "The .NET $arch installer reported an error."

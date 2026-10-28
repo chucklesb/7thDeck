@@ -30,13 +30,14 @@ fixture() {
   export DROIDDECK_INNOEXTRACT=$T/none DROIDDECK_MSITOOLS=$T/none
   export DROIDDECK_APPS_DIR=$T/opt/droiddeck-apps
   export DROIDDECK_BIN=$DD_BIN DROIDDECK_PROTON_EXTRA=$REPO/tests/stubs/droiddeck-proton-extra
-  unset STUB_PROTON_EXTRA_FAIL DROIDDECK_STEAM_SHORTCUTS
+  export DOTNET_METADATA=file://$REPO/tests/fixtures/dotnet
+  unset STUB_PROTON_EXTRA_FAIL DROIDDECK_STEAM_SHORTCUTS STUB_7H_DOTNET
   mkdir -p "$STEAM_ROOT/steamapps" "$DROIDDECK_APPS_DIR" "$STEAM_ROOT/config" "$STEAM_ROOT/userdata/12345/config"
   cp "$REPO/tests/fixtures/config.vdf" "$STEAM_ROOT/config/config.vdf"
   printf '"users"\n{\n\t"76561197960278073"\n\t{\n\t\t"MostRecent"\t"1"\n\t}\n}\n' > "$STEAM_ROOT/config/loginusers.vdf"
   # cached downloads, so no test touches the network
   mkdir -p "$XDG_CACHE_HOME/7thdroid"
-  for f in 7thHeaven-v4.5.2.0_Release.exe windowsdesktop-runtime-10.0.14-win-x64.exe windowsdesktop-runtime-10.0.14-win-x86.exe; do
+  for f in 7thHeaven-v4.5.2.0_Release.exe windowsdesktop-runtime-{9.0.22,10.0.14}-win-{x64,x86}.exe; do
     echo stub > "$XDG_CACHE_HOME/7thdroid/$f"
   done
   : > "$STUB_LOG"
@@ -90,7 +91,10 @@ check "installers ran in 7thDroid's own prefix" grep -q $'run\t'"${CD##*/}"$'\t7
 check "nothing ran in another prefix" bash -c "! cut -f2 '$STUB_LOG' | grep -vqx '${CD##*/}'"
 check "installers ran with full x87 precision" bash -c "! cut -f4 '$STUB_LOG' | grep -vqx 0"
 check "DroidDeck-Proton pinned to the prefix" grep -q "${CD##*/}" "$T/.local/share/droiddeck-compat/games.json"
-check ".NET x64 and x86" test -d "$CD/pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.14"
+check ".NET 9 x64 for the pinned build" test -d "$CD/pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/9.0.22"
+check ".NET 9 x86 for the pinned build" test -d "$CD/pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/9.0.22"
+check "no .NET 10" test ! -e "$CD/pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.14"
+check ".NET installed before 7th Heaven" bash -c "grep -n . '$STUB_LOG' | grep -m1 -q '^1:.*windowsdesktop-runtime-9.0.22-win-x64'"
 check "Avalon.Graphics in user.reg" grep -q '"DisableHWAcceleration"=dword:00000001' "$CD/pfx/user.reg"
 check "dinput override in user.reg" grep -q '"dinput"="native,builtin"' "$CD/pfx/user.reg"
 check "FF7Exe is the game's FFVII.exe" grep -qF "<FF7Exe>Z:${T//\//\\}\\sd\\steamapps\\common\\FINAL FANTASY VII\\FFVII.exe</FF7Exe>" <(settings "$CD")
@@ -126,7 +130,7 @@ check "installer succeeds" installer --no-steam
 check "detected as Heroic Flatpak" grep -q "GOG via Heroic (Flatpak)" "$T/out.log"
 ID=$(python3 "$REPO/lib/steam_shortcut.py" appid "$T/.local/share/7thdroid/7th Heaven.sh" "7th Heaven")
 check "dedicated prefix named after the shortcut id" test -f "$STEAM_ROOT/steamapps/compatdata/$ID/pfx/drive_c/7th Heaven/7th Heaven.exe"
-check "first run used --prefix" grep -q $'run\t'"$ID"$'\twindowsdesktop-runtime-10.0.14-win-x64.exe' "$STUB_LOG"
+check "first run used --prefix" grep -q $'run\t'"$ID"$'\twindowsdesktop-runtime-9.0.22-win-x64.exe' "$STUB_LOG"
 check "version GOG" grep -q '<FF7InstalledVersion>GOG</FF7InstalledVersion>' <(settings "$STEAM_ROOT/steamapps/compatdata/$ID")
 check "drive label" test "$(cat "$STEAM_ROOT/steamapps/compatdata/$ID/pfx/drive_c/.windows-label")" = FF7DISC1
 cleanup
@@ -229,6 +233,24 @@ before=$(other_prefixes)
 check "installer succeeds" installer --no-steam
 check "says the old prefix is left alone" grep -qF "older 7thDroid installed 7th Heaven into $STEAM_ROOT/steamapps/compatdata/39140" "$T/out.log"
 check "old prefix untouched" test "$(other_prefixes)" = "$before"
+cleanup
+
+echo "Installed 7th Heaven asks for another .NET than expected"
+fixture
+export STUB_7H_DOTNET=10.0.1
+check "installer succeeds" installer --no-steam --source "$REPO/tests/fixtures/game"
+CD=$(own_prefix)
+check "says what 7th Heaven asks for" grep -q "asks for .NET Desktop 10.0" "$T/out.log"
+check ".NET 10 installed afterwards" test -d "$CD/pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.14"
+check "newest stable patch, not the release candidate" bash -c "! grep -q 10.0.15 '$STUB_LOG'"
+cleanup
+
+echo ".NET release metadata unreachable"
+fixture
+export DOTNET_METADATA=file:///nonexistent
+check "installer succeeds" installer --no-steam --source "$REPO/tests/fixtures/game"
+check "falls back to the known .NET 9 patch" grep -q "windowsdesktop-runtime-9.0.22-win-x64.exe" "$STUB_LOG"
+check "7th Heaven confirmed on .NET 9" grep -q "runs on .NET Desktop 9.0, which is installed" "$T/out.log"
 cleanup
 
 echo "Missing DroidDeck"
