@@ -84,7 +84,7 @@ registry_with_reg_exe() {
 # The optional winetricks dinput verb, from a Proton build that ships protonfixes (e.g. DroidDeck-Proton).
 winetricks_dinput() {
   local compatdata=$1 tool winetricks
-  for winetricks in "$STEAM_ROOT"/compatibilitytools.d/*/protonfixes/winetricks; do
+  for winetricks in "$STEAM_ROOT/compatibilitytools.d/${PROTON_DIR:-none}/protonfixes/winetricks" "$STEAM_ROOT"/compatibilitytools.d/*/protonfixes/winetricks; do
     [ -f "$winetricks" ] && tool=${winetricks%/protonfixes/winetricks} && break
   done
   [ -n "$tool" ] || { warn "No Proton with protonfixes/winetricks is installed; skipping the dinput verb."; return; }

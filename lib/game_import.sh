@@ -121,14 +121,30 @@ unpack_gog_setup() {
 
 # Wine CD drives for the discs: d:, e:, f:, each with the label FF7 checks for.
 map_cd_drives() {
-  local compatdata=$1 i letters=(d e f) disc
+  local compatdata=$1 i letters=(d e f) disc drive entry
   CD_DRIVES=()
   for i in "${!CD_DISCS[@]}"; do
     disc=${CD_DISCS[$i]}
-    run ln -sfn "$disc" "$compatdata/pfx/dosdevices/${letters[$i]}:"
+    drive=$disc
+    # A folder the user gave is never written to: the drive is a folder of links to its contents,
+    # which can carry the label. Discs 7thDroid unpacked itself get the label directly.
+    if [[ $disc != "$DATA_DIR/cd/"* ]]; then
+      drive=$DATA_DIR/cd/drive$((i + 1))
+      if [ "$DRY_RUN" != 1 ]; then
+        rm -rf -- "$drive"
+        mkdir -p "$drive"
+        for entry in "$disc"/* "$disc"/.[!.]*; do
+          [ -e "$entry" ] || continue
+          case ${entry##*/} in .windows-label|.windows-serial) continue ;; esac
+          ln -s "$entry" "$drive/${entry##*/}"
+        done
+      fi
+      CD_DISCS[$i]=$drive
+    fi
+    run ln -sfn "$drive" "$compatdata/pfx/dosdevices/${letters[$i]}:"
     [ "$DRY_RUN" = 1 ] || {
-      printf '%s\n' "${FF7_CD_LABELS[$i]}" > "$disc/.windows-label"
-      printf '%s\n' "4400000$i" > "$disc/.windows-serial"
+      printf '%s\n' "${FF7_CD_LABELS[$i]}" > "$drive/.windows-label"
+      printf '%s\n' "4400000$i" > "$drive/.windows-serial"
     }
     CD_DRIVES+=("${letters[$i]}:")
   done
@@ -144,7 +160,7 @@ install_pending_game() {
         || warn "The installer reported an error."
       ;;
     cd)
-      setup=$(find "${CD_DISCS[0]}" -maxdepth 1 -type f \( -iname 'setup.exe' -o -iname 'install.exe' \) | head -n1)
+      setup=$(find -L "${CD_DISCS[0]}" -maxdepth 1 -type f \( -iname 'setup.exe' -o -iname 'install.exe' \) | head -n1)
       [ -n "$setup" ] || die "Disc 1 has no setup.exe."
       info "Running the CD installer from drive d:. Choose a full install if it asks."
       fex_run "$compatdata" "$setup" || warn "The installer reported an error."

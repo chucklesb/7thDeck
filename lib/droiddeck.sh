@@ -6,10 +6,12 @@ STEAM_ROOT=${STEAM_ROOT:-$HOME/.local/share/Steam}
 PROTON_RUN=${DROIDDECK_PROTON_RUN:-$(command -v droiddeck-proton-run 2>/dev/null || echo /usr/local/bin/droiddeck-proton-run)}
 INNOEXTRACT=${DROIDDECK_INNOEXTRACT:-$(command -v droiddeck-innoextract 2>/dev/null || command -v innoextract 2>/dev/null || echo /usr/local/bin/droiddeck-innoextract)}
 MSITOOLS_DIR=${DROIDDECK_MSITOOLS:-/usr/local/lib/droiddeck-msitools}
-SHORTCUTS_TOOL=${DROIDDECK_STEAM_SHORTCUTS:-$(command -v droiddeck-steam-shortcuts 2>/dev/null || echo /usr/local/bin/droiddeck-steam-shortcuts)}
+# DroidDeck's Python helpers, which 7thDroid loads to ask DroidDeck's own code rather than copy it.
+DROIDDECK_BIN=${DROIDDECK_BIN:-/usr/local/bin}
+SHORTCUTS_TOOL=${DROIDDECK_STEAM_SHORTCUTS:-$DROIDDECK_BIN/droiddeck-steam-shortcuts}
+PROTON_EXTRA=${DROIDDECK_PROTON_EXTRA:-$DROIDDECK_BIN/droiddeck-proton-extra}
 APPS_DIR=${DROIDDECK_APPS_DIR:-/opt/droiddeck-apps}
 EXTRA_LIBRARIES=(/mnt/droiddeck-sd /mnt/droiddeck)
-PROTON_DEPOTS=("Proton Experimental (ARM64)" "Proton 11.0 (ARM64)")
 
 # The FEX settings DroidDeck's droiddeck-game-env gives .NET programs (DOTNET_FEX). x87 full precision
 # is also what keeps InnoSetup installers from aborting with "File not fpund".
@@ -33,6 +35,10 @@ preflight() {
   [ -d "$STEAM_ROOT" ] || missing+=("a Steam installation at $STEAM_ROOT (set STEAM_ROOT to override, or open Steam in DroidDeck once)")
   have curl || missing+=("curl")
   have python3 || missing+=("python3")
+  local module
+  for module in steam-compatibility droiddeck-proton-run; do
+    [ -f "$DROIDDECK_BIN/$module" ] || missing+=("$DROIDDECK_BIN/$module (set DROIDDECK_BIN to the folder that has it)")
+  done
   if [ ${#missing[@]} -gt 0 ]; then
     printf '    Missing: %s\n' "${missing[@]}" >&2
     die "$APP_NAME needs the pieces above. It is meant to run inside DroidDeck's Linux environment."
@@ -100,38 +106,76 @@ steam_app_installed() {
   return 1
 }
 
-# The ARM64 Proton depot droiddeck-proton starts, or a third-party Windows tool in compatibilitytools.d.
-proton_available() {
-  local lib name tool
-  while IFS= read -r lib; do
-    for name in "${PROTON_DEPOTS[@]}"; do
-      if [ -d "$lib/steamapps/common/$name/files/bin-arm64" ] && [ -x "$lib/steamapps/common/$name/proton" ]; then
-        printf '%s\n' "$lib/steamapps/common/$name"
-        return 0
-      fi
-    done
-  done < <(steam_libraries)
-  for tool in "$STEAM_ROOT"/compatibilitytools.d/*/; do
-    [ -f "$tool/compatibilitytool.vdf" ] && [ -f "$tool/proton" ] || continue
-    grep -qi '"from_oslist"[[:space:]]*"[^"]*windows' "$tool/compatibilitytool.vdf" || continue
-    printf '%s\n' "${tool%/}"
-    return 0
-  done
-  return 1
+# The newest DroidDeck-Proton build DroidDeck has adopted -> "name<TAB>dir"
+droiddeck_proton() {
+  python "$LIB_DIR/proton_tool.py" find "$DROIDDECK_BIN" "$STEAM_ROOT" 2>/dev/null
 }
 
-ensure_proton() {
-  step "Checking for Proton"
-  local found
-  while ! found=$(proton_available); do
-    [ "$DRY_RUN" = 1 ] && { warn "No ARM64 Proton found (continuing because of --dry-run)."; return; }
-    warn "No ARM64 Proton is installed yet."
-    info "Open Steam in DroidDeck and let it finish downloading Proton, FEX and the Steam Linux Runtime."
-    info "This sometimes takes more than one start of Steam."
-    [ "$ASSUME_YES" = 1 ] && die "Proton is missing."
-    pause "When Steam has finished downloading,"
+# The tool droiddeck-proton-run will start PREFIX_ID's programs with.
+chosen_proton() {
+  python "$LIB_DIR/proton_tool.py" chosen "$DROIDDECK_BIN" "$STEAM_ROOT" "$1" 2>/dev/null
+}
+
+# DroidDeck registers (adopts) the tools in compatibilitytools.d and applies per-game choices to
+# Steam's CompatToolMapping. droiddeck-proton-extra runs this itself after an install.
+steam_compatibility() {
+  run python "$DROIDDECK_BIN/steam-compatibility" "$STEAM_ROOT" >> "$LOG_FILE" 2>&1
+}
+
+# ensure_droiddeck_proton -> PROTON_NAME, PROTON_DIR. 7th Heaven is only run with DroidDeck-Proton.
+ensure_droiddeck_proton() {
+  step "Checking for DroidDeck-Proton"
+  local found free
+  found=$(droiddeck_proton)
+  if [ -z "$found" ] && compgen -G "$STEAM_ROOT/compatibilitytools.d/DroidDeck-Proton*/toolmanifest.vdf" >/dev/null; then
+    info "DroidDeck-Proton is installed but not registered yet; registering it."
+    steam_compatibility
+    found=$(droiddeck_proton)
+  fi
+  if [ -z "$found" ]; then
+    [ "$DRY_RUN" = 1 ] && { warn "DroidDeck-Proton is not installed (continuing because of --dry-run)."; PROTON_NAME=DroidDeck-Proton PROTON_DIR=DroidDeck-Proton; return; }
+    warn "DroidDeck-Proton is not installed. 7th Heaven needs it."
+    free=$(df -Pk "$STEAM_ROOT" 2>/dev/null | awk 'NR == 2 { print $4 * 1024 }')
+    info "It is downloaded from github.com/Droid-Deck/DroidDeck-Proton (several hundred MB) and needs about 4 GB free${free:+; $((free / 1073741824)) GB is free}."
+    if [ ! -f "$PROTON_EXTRA" ] || ! ask_yn "Install the newest DroidDeck-Proton now?" y \
+       || ! run python "$PROTON_EXTRA" "$STEAM_ROOT" droiddeck; then
+      die "DroidDeck-Proton is required. Install it from the DroidDeck app's Proton settings, or run:
+    droiddeck-proton-extra $STEAM_ROOT droiddeck
+and then run this installer again."
+    fi
+    found=$(droiddeck_proton)
+    [ -n "$found" ] || die "DroidDeck-Proton was downloaded but DroidDeck did not register it. See $LOG_FILE."
+  fi
+  IFS=$'\t' read -r PROTON_NAME PROTON_DIR <<< "$found"
+  ok "Using $PROTON_DIR"
+}
+
+# pin_proton PREFIX_ID - make droiddeck-proton-run start this prefix's programs with DroidDeck-Proton,
+# through the same per-game choice the DroidDeck app writes. Nothing else's choice is changed.
+pin_proton() {
+  local id=$1 chosen
+  [ "$DRY_RUN" = 1 ] && { info "Would make sure prefix $id runs with $PROTON_DIR."; return 0; }
+  chosen=$(chosen_proton "$id")
+  if [ "$chosen" = "$PROTON_NAME" ]; then
+    ok "Prefix $id runs with $PROTON_DIR."
+    return 0
+  fi
+  info "Prefix $id would run with ${chosen:-nothing}; asking DroidDeck to use $PROTON_DIR for it."
+  python "$LIB_DIR/proton_tool.py" request "$DROIDDECK_BIN" "$id" "$PROTON_DIR" \
+    || die "Could not write DroidDeck's per-game Proton choice (~/.local/share/droiddeck-compat/games.json)."
+  while true; do
+    if ! steam_running; then
+      steam_compatibility
+    fi
+    chosen=$(chosen_proton "$id")
+    [ "$chosen" = "$PROTON_NAME" ] && { ok "Prefix $id runs with $PROTON_DIR."; return 0; }
+    if steam_running && [ "$ASSUME_YES" != 1 ] \
+       && ask_yn "Steam keeps its Proton choices while it runs. Close Steam, then answer yes to retry" y; then
+      continue
+    fi
+    die "droiddeck-proton-run would still use ${chosen:-no Proton} for prefix $id, not $PROTON_DIR.
+DroidDeck applies the choice when Steam is closed: close Steam (or restart the DroidDeck session) and run this installer again."
   done
-  ok "Found $found"
 }
 
 # Is a wineserver running for this compatdata's prefix?
@@ -159,43 +203,21 @@ wait_prefix_idle() {
   return 0
 }
 
-# The arguments that make droiddeck-proton-run use COMPATDATA for PROGRAM. A program inside the prefix's
-# drive_c is matched to it by droiddeck-proton-run itself; --prefix ID only reaches the client's own
-# steamapps/compatdata, so a program outside a prefix in another library is copied into drive_c first.
-prefix_target() {
-  local compatdata=${1%/} program=$2 id staged
-  id=${compatdata##*/}
-  case $program in
-    "$compatdata"/pfx/*) printf '%s\n' "$program"; return ;;
-  esac
-  if [ "$compatdata" = "$STEAM_ROOT/steamapps/compatdata/$id" ]; then
-    printf '%s\n%s\n%s\n' --prefix "$id" "$program"
-    return
-  fi
-  staged=$compatdata/pfx/drive_c/$APP_ID-setup/${program##*/}
-  if [ "$DRY_RUN" != 1 ]; then
-    { mkdir -p "${staged%/*}" && cp -f "$program" "$staged"; } || die "Could not copy ${program##*/} into the prefix."
-  fi
-  printf '%s\n' "$staged"
-}
-
 # proton_run COMPATDATA PROGRAM [ARGS...] - a normal launch: the user's game environment applies.
 proton_run() {
-  local compatdata=$1 program=$2 target=()
+  local compatdata=$1 program=$2
   shift 2
   check_compatdata "$compatdata"
-  mapfile -t target < <(prefix_target "$compatdata" "$program")
-  run "$PROTON_RUN" "${target[@]}" "$@"
+  run "$PROTON_RUN" --prefix "${compatdata##*/}" "$program" "$@"
 }
 
 # fex_run COMPATDATA PROGRAM [ARGS...] - for installers. The run verb keeps droiddeck-game-env from
 # applying the user's FEX preset, so the DOTNET_FEX values set here are the ones FEX sees.
 fex_run() {
-  local compatdata=$1 program=$2 target=() rc
+  local compatdata=$1 program=$2 rc
   shift 2
   check_compatdata "$compatdata"
-  mapfile -t target < <(prefix_target "$compatdata" "$program")
-  run env "${DOTNET_FEX[@]}" "$PROTON_RUN" --verb run "${target[@]}" "$@"
+  run env "${DOTNET_FEX[@]}" "$PROTON_RUN" --verb run --prefix "${compatdata##*/}" "$program" "$@"
   rc=$?
   wait_prefix_idle "$compatdata"
   return $rc
@@ -207,10 +229,13 @@ compatdata_for() {
   printf '%s\n' "$STEAM_ROOT/steamapps/compatdata/$1"
 }
 
-# Every prefix path ends in steamapps/compatdata/<number>; anything else is a bug, and must never
-# turn into paths like /pfx.
+# 7thDroid only ever runs programs in, or writes to, its own prefix: one under the client's own
+# steamapps/compatdata. Anything else is a bug, and must never reach another game's prefix.
 check_compatdata() {
-  [[ $1 =~ /steamapps/compatdata/-?[0-9]+$ ]] || die "Internal error: bad prefix path '$1'"
+  local id=${1##*/}
+  [[ $id =~ ^[1-9][0-9]*$ ]] && [ "$1" = "$STEAM_ROOT/steamapps/compatdata/$id" ] \
+    || die "Internal error: refusing to use prefix '$1'"
+  [ "$id" = "${PREFIX_ID:-$id}" ] || die "Internal error: '$1' is not 7thDroid's prefix"
 }
 
 steam_running() {

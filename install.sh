@@ -79,18 +79,21 @@ info "Log: $LOG_FILE"
 step "Checking the environment"
 preflight
 
+PREFIX_ID=$(dedicated_prefix_id) || die "Could not work out 7thDroid's prefix id."
+DEDICATED=$(compatdata_for "$PREFIX_ID")
+
 if [ "$SHORTCUTS_ONLY" = 1 ]; then
   load_state || die "No earlier install found ($STATE_FILE). Run the full installer first."
-  check_compatdata "$COMPATDATA"
+  [ "$COMPATDATA" = "$DEDICATED" ] || die "The last install was made by an older $APP_NAME. Run the full installer once."
   write_launcher "$(seventh_exe "$COMPATDATA")"
   offer_shortcuts
   exit 0
 fi
 
-ensure_proton
+ensure_droiddeck_proton
 
 step "Finding FINAL FANTASY VII"
-APPID='' COMPATDATA=''
+APPID=''
 if [ ${#SOURCES[@]} -gt 0 ]; then
   manual_source "${SOURCES[@]}"
 else
@@ -105,7 +108,7 @@ else
     if [ "$pick" -eq ${#FOUND[@]} ]; then
       manual_source
     else
-      IFS=$'\t' read -r SOURCE_KIND APPID GAME_DIR COMPATDATA _ <<< "${FOUND[$pick]}"
+      IFS=$'\t' read -r SOURCE_KIND APPID GAME_DIR _ _ <<< "${FOUND[$pick]}"
       GAME_EXE=$(find_game_exe "$GAME_DIR")
       [ -n "$GAME_EXE" ] || die "No FF7 executable found in $GAME_DIR. Is the game fully installed?"
     fi
@@ -122,18 +125,16 @@ case $SOURCE_KIND in
 esac
 
 step "Choosing the Proton prefix"
-if [ "$SOURCE_KIND" = steam ]; then
-  info "Using the Steam prefix of FF7: $COMPATDATA"
-  while [ ! -f "$COMPATDATA/pfx/system.reg" ]; do
-    [ "$DRY_RUN" = 1 ] && break
-    warn "Steam has not created FF7's prefix yet."
-    [ "$ASSUME_YES" = 1 ] && die "Start FINAL FANTASY VII once from Steam, quit it, then run this again."
-    pause "Start FINAL FANTASY VII once from Steam, then quit the game."
-  done
-else
-  COMPATDATA=$(compatdata_for "$(dedicated_prefix_id)") || exit 1
-  info "Using a prefix of its own: $COMPATDATA"
+# 7th Heaven always gets a prefix of its own, made by DroidDeck-Proton. The game is reached through
+# Z: (Proton maps it to /), so no other prefix - Steam's FF7 prefix included - is ever touched.
+COMPATDATA=$DEDICATED
+info "7th Heaven's own prefix: $COMPATDATA"
+previous=$(load_state 2>/dev/null && printf '%s' "$COMPATDATA")
+if [ -n "$previous" ] && [ "$previous" != "$COMPATDATA" ]; then
+  info "An older $APP_NAME installed 7th Heaven into $previous. That prefix is left as it is."
+  info "If it is a Steam game's prefix and the game misbehaves, delete that folder and Steam recreates it."
 fi
+pin_proton "$PREFIX_ID"
 
 select_seventh_heaven
 

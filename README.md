@@ -17,8 +17,10 @@ Valve's ARM64 Proton and FEX.
    - an installed game folder;
    - a GOG installer (`setup_final_fantasy_vii_*.exe`);
    - the 1998 CD-ROM release, as disc images (`.iso`) or folders copied from the discs.
-2. **Prepares a Proton prefix.**
-   - Steam games use the prefix Steam made for FF7. Any other copy gets a prefix of its own, and the game files stay where they are.
+2. **Prepares a Proton prefix of 7th Heaven's own**, made by [DroidDeck-Proton](https://github.com/Droid-Deck/DroidDeck-Proton).
+   - The game files stay where they are; 7th Heaven reaches them through Wine's `Z:` drive, which is the whole Linux file system.
+   - No other prefix is touched, including the one Steam made for FF7, so vanilla FF7 from Steam keeps working as before.
+   - If DroidDeck-Proton isn't your default Proton, 7thDroid sets it for its own prefix only, the same way picking a game's Proton in the DroidDeck app does.
    - It installs the .NET Desktop Runtime that 7th Heaven needs, both x64 and x86.
    - It turns off WinForms/WPF hardware acceleration, because 7th Heaven's controls vanish without that.
    - It makes Wine prefer 7th Heaven's `dinput.dll`. Without that, mods silently don't load.
@@ -34,8 +36,15 @@ Without that, the GOG installer stops with "File not fpund". 7thDroid passes the
 
 ## Requirements
 
-- DroidDeck with Steam set up. Proton has to be downloaded first: open Steam once and let it finish (sometimes this takes a couple of starts).
-- For the Steam releases: the game installed and started once from Steam, so that Steam creates its prefix.
+- DroidDeck with Steam set up (open it once and let it finish downloading what it needs).
+- DroidDeck-Proton. If it's missing, 7thDroid offers to install the newest release with DroidDeck's `droiddeck-proton-extra`; that needs about 4 GB free.
+- Steam closed while 7thDroid sets DroidDeck-Proton for its prefix, if that turns out to be needed (it asks).
+
+### Good to know
+
+- **Saves:** FF7 run through 7th Heaven keeps its saves in 7th Heaven's prefix, separate from vanilla FF7 started from Steam.
+- **Game files:** 7th Heaven itself writes into the game folder on first run (for the 2026 and GOG releases, `ff7/workingdir` and its own patched `ff7_en.exe`), as it does on Windows. Steam's "Verify integrity of game files" restores the originals.
+- **Disc folders you supply are never written to:** 7thDroid maps them as CD drives through small folders of links under `~/.local/share/7thdroid/cd/`.
 
 ## Usage
 
@@ -72,11 +81,12 @@ The log is written to `~/.local/state/7thdroid/install.log`.
 - **The Steam shortcut won't start.** The shortcut is a Linux script. If Steam tries to run it with Proton, open its Properties → Compatibility and turn off the forced compatibility tool.
 - **The Steam shortcut wasn't added.** Steam has to be closed while shortcuts are written. Close Steam, then run `bash install.sh --shortcuts-only`.
 - **Mods don't load.** Re-run with `--winetricks-dinput` if a Proton with protonfixes is installed, and please report it.
-- **Paths to DroidDeck's helpers changed.** Each one can be overridden: `DROIDDECK_PROTON_RUN`, `DROIDDECK_INNOEXTRACT`, `DROIDDECK_MSITOOLS`, `DROIDDECK_STEAM_SHORTCUTS`, `DROIDDECK_APPS_DIR` and `STEAM_ROOT`.
+- **An earlier 7thDroid installed into Steam's FF7 prefix.** That prefix is left as it is. If vanilla FF7 misbehaves, delete `~/.local/share/Steam/steamapps/compatdata/39140` (or `3837340`) and Steam recreates it the next time the game starts.
+- **Paths to DroidDeck's helpers changed.** Each one can be overridden: `DROIDDECK_BIN` (the folder with DroidDeck's helper scripts), `DROIDDECK_PROTON_RUN`, `DROIDDECK_PROTON_EXTRA`, `DROIDDECK_INNOEXTRACT`, `DROIDDECK_MSITOOLS`, `DROIDDECK_STEAM_SHORTCUTS`, `DROIDDECK_APPS_DIR` and `STEAM_ROOT`.
 
 ## Development
 
-The tests run on any Linux machine. A stub replaces `droiddeck-proton-run`, and a DroidDeck checkout (`DROIDDECK_SRC`) enables the checks against DroidDeck's own shortcut code:
+The tests run on any Linux machine against a DroidDeck checkout (`DROIDDECK_SRC`), whose own Python helpers decide Proton choices and Steam shortcuts. Stubs replace running Wine and downloading DroidDeck-Proton:
 
 ```bash
 DROIDDECK_SRC=../DroidDeck bash tests/test_install.sh

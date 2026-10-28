@@ -1,10 +1,12 @@
 #!/bin/bash
-# End-to-end runs of install.sh against fixture trees, with tests/stubs/droiddeck-proton-run standing in
-# for DroidDeck. DROIDDECK_SRC (a DroidDeck checkout) enables the Steam shortcut checks.
+# End-to-end runs of install.sh against fixture trees. DroidDeck's own Python helpers come from a
+# DroidDeck checkout (DROIDDECK_SRC); tests/stubs/droiddeck-proton-run stands in for running Wine.
 set -u
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DROIDDECK_SRC=${DROIDDECK_SRC:-}
-DD_BIN=${DROIDDECK_SRC:+$DROIDDECK_SRC/tools/linuxfs/overlay/usr/local/bin}
+DD_BIN=$DROIDDECK_SRC/tools/linuxfs/overlay/usr/local/bin
+[ -n "$DROIDDECK_SRC" ] && [ -f "$DD_BIN/steam-compatibility" ] \
+  || { echo "Set DROIDDECK_SRC to a DroidDeck checkout (https://github.com/Droid-Deck/DroidDeck)." >&2; exit 2; }
 FAILED=0 PASSED=0
 
 pass() { PASSED=$((PASSED + 1)); printf '  ok   %s\n' "$1"; }
@@ -27,12 +29,10 @@ fixture() {
   export DROIDDECK_PROTON_RUN=$REPO/tests/stubs/droiddeck-proton-run
   export DROIDDECK_INNOEXTRACT=$T/none DROIDDECK_MSITOOLS=$T/none
   export DROIDDECK_APPS_DIR=$T/opt/droiddeck-apps
-  export DROIDDECK_STEAM_SHORTCUTS=${DD_BIN:+$DD_BIN/droiddeck-steam-shortcuts}
-  [ -n "$DROIDDECK_STEAM_SHORTCUTS" ] || DROIDDECK_STEAM_SHORTCUTS=$T/none
-  mkdir -p "$STEAM_ROOT/steamapps/common/Proton Experimental (ARM64)/files/bin-arm64" "$DROIDDECK_APPS_DIR" \
-    "$STEAM_ROOT/config" "$STEAM_ROOT/userdata/12345/config"
-  touch "$STEAM_ROOT/steamapps/common/Proton Experimental (ARM64)/proton"
-  chmod +x "$STEAM_ROOT/steamapps/common/Proton Experimental (ARM64)/proton"
+  export DROIDDECK_BIN=$DD_BIN DROIDDECK_PROTON_EXTRA=$REPO/tests/stubs/droiddeck-proton-extra
+  unset STUB_PROTON_EXTRA_FAIL DROIDDECK_STEAM_SHORTCUTS
+  mkdir -p "$STEAM_ROOT/steamapps" "$DROIDDECK_APPS_DIR" "$STEAM_ROOT/config" "$STEAM_ROOT/userdata/12345/config"
+  cp "$REPO/tests/fixtures/config.vdf" "$STEAM_ROOT/config/config.vdf"
   printf '"users"\n{\n\t"76561197960278073"\n\t{\n\t\t"MostRecent"\t"1"\n\t}\n}\n' > "$STEAM_ROOT/config/loginusers.vdf"
   # cached downloads, so no test touches the network
   mkdir -p "$XDG_CACHE_HOME/7thdroid"
@@ -40,6 +40,30 @@ fixture() {
     echo stub > "$XDG_CACHE_HOME/7thdroid/$f"
   done
   : > "$STUB_LOG"
+  if [ "${1:-}" = no-proton ]; then
+    python3 "$DD_BIN/steam-compatibility" "$STEAM_ROOT" > /dev/null
+  else
+    droiddeck_proton
+  fi
+}
+
+# A DroidDeck-Proton build, registered by DroidDeck's steam-compatibility as on a device.
+droiddeck_proton() {
+  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from fake_proton import make_tool; make_tool(sys.argv[2], "DroidDeck-Proton-11-11.9")' \
+    "$REPO/tests/stubs" "$STEAM_ROOT/compatibilitytools.d"
+  python3 "$DD_BIN/steam-compatibility" "$STEAM_ROOT" > /dev/null
+}
+
+# 7thDroid's prefix for this fixture home
+own_prefix() {
+  printf '%s/steamapps/compatdata/%s\n' "$STEAM_ROOT" \
+    "$(python3 "$REPO/lib/steam_shortcut.py" appid "$T/.local/share/7thdroid/7th Heaven.sh" "7th Heaven")"
+}
+
+# A checksum of every prefix but 7thDroid's, to show none was touched.
+other_prefixes() {
+  find "$STEAM_ROOT/steamapps/compatdata" "$T/sd/steamapps/compatdata" -mindepth 1 -path "$(own_prefix)" -prune -o -print 2>/dev/null \
+    | sort | while IFS= read -r f; do printf '%s ' "$f"; [ -f "$f" ] && md5sum < "$f" || echo; done | md5sum
 }
 
 steam_game() { # LIBRARY APPID INSTALLDIR EXE
@@ -58,11 +82,14 @@ fixture
 mkdir -p "$T/sd"
 printf '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' "$STEAM_ROOT" "$T/sd" > "$STEAM_ROOT/steamapps/libraryfolders.vdf"
 steam_game "$T/sd" 3837340 "FINAL FANTASY VII" FFVII.exe
-CD=$T/sd/steamapps/compatdata/3837340
+before=$(other_prefixes)
 check "installer succeeds" installer --no-steam
-check "installers ran in FF7's prefix" grep -q $'run\t3837340\t7thHeaven-v4.5.2.0_Release.exe\t0' "$STUB_LOG"
+CD=$(own_prefix)
+check "Steam's FF7 prefix untouched" test "$(other_prefixes)" = "$before"
+check "installers ran in 7thDroid's own prefix" grep -q $'run\t'"${CD##*/}"$'\t7thHeaven-v4.5.2.0_Release.exe\t0' "$STUB_LOG"
+check "nothing ran in another prefix" bash -c "! cut -f2 '$STUB_LOG' | grep -vqx '${CD##*/}'"
 check "installers ran with full x87 precision" bash -c "! cut -f4 '$STUB_LOG' | grep -vqx 0"
-check "installers were staged into drive_c" test -f "$CD/pfx/drive_c/7thdroid-setup/7thHeaven-v4.5.2.0_Release.exe"
+check "DroidDeck-Proton pinned to the prefix" grep -q "${CD##*/}" "$T/.local/share/droiddeck-compat/games.json"
 check ".NET x64 and x86" test -d "$CD/pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.14"
 check "Avalon.Graphics in user.reg" grep -q '"DisableHWAcceleration"=dword:00000001' "$CD/pfx/user.reg"
 check "dinput override in user.reg" grep -q '"dinput"="native,builtin"' "$CD/pfx/user.reg"
@@ -78,8 +105,11 @@ cleanup
 echo "Steam 2013 release, launch entries declined"
 fixture
 steam_game "$STEAM_ROOT" 39140 "FINAL FANTASY VII" ff7_en.exe
-CD=$STEAM_ROOT/steamapps/compatdata/39140
+before=$(other_prefixes)
 check "installer succeeds" installer --no-app-entry --no-steam --no-desktop
+CD=$(own_prefix)
+check "Steam's FF7 prefix untouched" test "$(other_prefixes)" = "$before"
+check "Z: path to ff7_en.exe" grep -qF "<FF7Exe>Z:${STEAM_ROOT//\//\\}\steamapps\common\FINAL FANTASY VII\ff7_en.exe</FF7Exe>" <(settings "$CD")
 check "version Steam" grep -q '<FF7InstalledVersion>Steam</FF7InstalledVersion>' <(settings "$CD")
 check "user slot" test -d "$CD/pfx/drive_c/users/steamuser/Documents/Square Enix/FINAL FANTASY VII Steam/user_12345678"
 check "no app entry" test ! -e "$T/opt/droiddeck-apps/7thheaven"
@@ -133,30 +163,73 @@ echo stub > "$T/cd1/SETUP.EXE"
 check "installer succeeds" installer --no-steam --source "$T/cd1" --source "$T/cd2"
 ID=$(python3 "$REPO/lib/steam_shortcut.py" appid "$T/.local/share/7thdroid/7th Heaven.sh" "7th Heaven")
 PFX=$STEAM_ROOT/steamapps/compatdata/$ID/pfx
-check "discs mapped to d: and e:" test "$(readlink "$PFX/dosdevices/e:")" = "$T/cd2"
-check "disc labels" test "$(cat "$T/cd2/.windows-label")" = FF7DISC2
+check "disc 2 mapped to e: through a link folder" test "$(readlink "$PFX/dosdevices/e:")" = "$T/.local/share/7thdroid/cd/drive2"
+check "link folder reaches the disc" test "$(readlink "$T/.local/share/7thdroid/cd/drive2/FF7")" = "$T/cd2/FF7"
+check "disc labels" test "$(cat "$T/.local/share/7thdroid/cd/drive2/.windows-label")" = FF7DISC2
+check "the user's disc folders were not written to" test -z "$(find "$T/cd1" "$T/cd2" -name '.windows-*')"
 check "CD drive type" grep -q '"e:"="cdrom"' "$PFX/system.reg"
 check "version Original98" grep -q '<FF7InstalledVersion>Original98</FF7InstalledVersion>' <(settings "${PFX%/pfx}")
 cleanup
 
-if [ -n "$DD_BIN" ]; then
-  echo "Steam shortcut (DroidDeck's shortcuts.vdf code)"
-  fixture
-  steam_game "$STEAM_ROOT" 39140 "FINAL FANTASY VII" ff7_en.exe
-  check "installer succeeds" installer --steam
-  check "shortcut readable by DroidDeck and untagged" python3 - "$DD_BIN/droiddeck-steam-shortcuts" "$STEAM_ROOT/userdata/12345/config/shortcuts.vdf" "$T/.local/share/7thdroid/7th Heaven.sh" <<'EOF'
+echo "Steam shortcut (DroidDeck's shortcuts.vdf code)"
+fixture
+steam_game "$STEAM_ROOT" 39140 "FINAL FANTASY VII" ff7_en.exe
+check "installer succeeds" installer --steam
+check "shortcut readable by DroidDeck and untagged" python3 - "$DD_BIN/droiddeck-steam-shortcuts" "$STEAM_ROOT/userdata/12345/config/shortcuts.vdf" "$T/.local/share/7thdroid/7th Heaven.sh" <<'EOF'
 import runpy, sys
 tool = runpy.run_path(sys.argv[1])
 items = list(tool["parse"](open(sys.argv[2], "rb").read())["shortcuts"].values())
 assert len(items) == 1 and items[0]["Exe"] == '"%s"' % sys.argv[3] and items[0]["tags"] == {}, items
 EOF
-  check "re-adding replaces it" bash -c "bash '$REPO/install.sh' --yes --shortcuts-only --steam --no-app-entry --no-desktop >/dev/null 2>&1 && python3 - <<'EOF'
+check "re-adding replaces it" bash -c "bash '$REPO/install.sh' --yes --shortcuts-only --steam --no-app-entry --no-desktop >/dev/null 2>&1 && python3 - <<'EOF'
 import runpy
 tool = runpy.run_path('$DD_BIN/droiddeck-steam-shortcuts')
 assert len(tool['parse'](open('$STEAM_ROOT/userdata/12345/config/shortcuts.vdf', 'rb').read())['shortcuts']) == 1
 EOF"
-  cleanup
-fi
+cleanup
+
+echo "DroidDeck-Proton missing: installed when accepted"
+fixture no-proton
+steam_game "$STEAM_ROOT" 39140 "FINAL FANTASY VII" ff7_en.exe
+check "installer succeeds" installer --no-steam
+check "DroidDeck-Proton installed and registered" test -f "$STEAM_ROOT/compatibilitytools.d/DroidDeck-Proton-11-11.9/droiddeck-proton-wrap"
+check "7th Heaven installed" test -f "$(own_prefix)/pfx/drive_c/7th Heaven/7th Heaven.exe"
+check "DroidDeck made it the default, so no per-game pin" test ! -e "$T/.local/share/droiddeck-compat/games.json"
+cleanup
+
+echo "DroidDeck-Proton missing: install fails"
+fixture no-proton
+steam_game "$STEAM_ROOT" 39140 "FINAL FANTASY VII" ff7_en.exe
+export STUB_PROTON_EXTRA_FAIL=1
+check "stops" bash -c "! bash '$REPO/install.sh' --yes --version pinned --no-steam >'$T/out.log' 2>&1"
+check "explains how to install it" grep -q 'droiddeck-proton-extra .* droiddeck' "$T/out.log"
+check "no prefix made" test ! -e "$(own_prefix)"
+cleanup
+
+echo "Valve Proton kept as the user's default: only 7thDroid's prefix is pinned"
+fixture
+python3 "$REPO/tests/stubs/fake_proton.py" prefer-valve "$T"
+check "installer succeeds" installer --no-steam --source "$REPO/tests/fixtures/game"
+ID=$(basename "$(own_prefix)")
+check "games.json asks for DroidDeck-Proton for the prefix" python3 -c '
+import json, sys
+games = json.load(open(sys.argv[1]))["games"]
+assert games == {sys.argv[2]: {"valve": False, "dir": "DroidDeck-Proton-11-11.9"}}, games' \
+  "$T/.local/share/droiddeck-compat/games.json" "$ID"
+check "CompatToolMapping for the prefix" bash -c "grep -A2 '\"$ID\"' '$STEAM_ROOT/config/config.vdf' | grep -q DroidDeck-Proton-11-11.9"
+check "user's default still Valve Proton" bash -c "grep -A2 '\"0\"' '$STEAM_ROOT/config/config.vdf' | grep -q droiddeck-proton-arm64"
+cleanup
+
+echo "Re-run after an older 7thDroid installed into Steam's FF7 prefix"
+fixture
+steam_game "$STEAM_ROOT" 39140 "FINAL FANTASY VII" ff7_en.exe
+mkdir -p "$T/.local/share/7thdroid"
+printf 'COMPATDATA=%q\n' "$STEAM_ROOT/steamapps/compatdata/39140" > "$T/.local/share/7thdroid/install.env"
+before=$(other_prefixes)
+check "installer succeeds" installer --no-steam
+check "says the old prefix is left alone" grep -qF "older 7thDroid installed 7th Heaven into $STEAM_ROOT/steamapps/compatdata/39140" "$T/out.log"
+check "old prefix untouched" test "$(other_prefixes)" = "$before"
+cleanup
 
 echo "Missing DroidDeck"
 fixture
