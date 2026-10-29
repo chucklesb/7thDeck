@@ -30,7 +30,7 @@ HAVE_SHORTCUTS_TOOL=0
 HAVE_APPS_DIR=0
 
 preflight() {
-  local missing=()
+  local missing=() line
   [ -x "$PROTON_RUN" ] || missing+=("droiddeck-proton-run (looked for $PROTON_RUN; set DROIDDECK_PROTON_RUN to override)")
   [ -d "$STEAM_ROOT" ] || missing+=("a Steam installation at $STEAM_ROOT (set STEAM_ROOT to override, or open Steam in DroidDeck once)")
   have curl || missing+=("curl")
@@ -42,6 +42,13 @@ preflight() {
   if [ ${#missing[@]} -gt 0 ]; then
     printf '    Missing: %s\n' "${missing[@]}" >&2
     die "$APP_NAME needs the pieces above. It is meant to run inside DroidDeck's Linux environment."
+  fi
+  local outdated
+  if ! outdated=$(python "$LIB_DIR/proton_tool.py" check "$DROIDDECK_BIN" 2>&1); then
+    debug "DroidDeck's helpers lack what $APP_NAME uses:"
+    while IFS= read -r line; do debug "  $line"; done <<< "$outdated"
+    die "This DroidDeck is too old for $APP_NAME, which needs DroidDeck 0.6.7 or newer (its DroidDeck-Proton support).
+Update the DroidDeck app, then open $APP_NAME again."
   fi
   debug "droiddeck-proton-run: $PROTON_RUN"
   debug "Steam root: $STEAM_ROOT"
@@ -108,12 +115,35 @@ steam_app_installed() {
 
 # The newest DroidDeck-Proton build DroidDeck has adopted -> "name<TAB>dir"
 droiddeck_proton() {
-  python "$LIB_DIR/proton_tool.py" find "$DROIDDECK_BIN" "$STEAM_ROOT" 2>/dev/null
+  proton_tool find "$DROIDDECK_BIN" "$STEAM_ROOT"
 }
 
 # The tool droiddeck-proton-run will start PREFIX_ID's programs with.
 chosen_proton() {
-  python "$LIB_DIR/proton_tool.py" chosen "$DROIDDECK_BIN" "$STEAM_ROOT" "$1" 2>/dev/null
+  proton_tool chosen "$DROIDDECK_BIN" "$STEAM_ROOT" "$1"
+}
+
+# proton_tool ARGS... - lib/proton_tool.py, with anything it reports (such as a DroidDeck helper that
+# differs from the one 7thDroid was written against) kept in the log.
+proton_tool() {
+  local err rc line
+  err=$(mktemp)
+  python "$LIB_DIR/proton_tool.py" "$@" 2>"$err"
+  rc=$?
+  if [ -s "$err" ]; then
+    debug "proton_tool.py $1 said:"
+    while IFS= read -r line; do debug "  $line"; done < "$err"
+  fi
+  rm -f "$err"
+  return $rc
+}
+
+# The DroidDeck-Proton folders in compatibilitytools.d, whatever DroidDeck made of them.
+droiddeck_proton_folders() {
+  local folder
+  for folder in "$STEAM_ROOT"/compatibilitytools.d/DroidDeck-Proton*/; do
+    [ -f "$folder/toolmanifest.vdf" ] && printf '%s\n' "$(basename "$folder")"
+  done
 }
 
 # DroidDeck registers (adopts) the tools in compatibilitytools.d and applies per-game choices to
@@ -127,10 +157,13 @@ ensure_droiddeck_proton() {
   step "Checking for DroidDeck-Proton"
   local found free
   found=$(droiddeck_proton)
-  if [ -z "$found" ] && compgen -G "$STEAM_ROOT/compatibilitytools.d/DroidDeck-Proton*/toolmanifest.vdf" >/dev/null; then
+  if [ -z "$found" ] && [ -n "$(droiddeck_proton_folders)" ]; then
     info "DroidDeck-Proton is installed but not registered yet; registering it."
     steam_compatibility
     found=$(droiddeck_proton)
+    # It is on disk: downloading it again would not help, so say what was found instead.
+    [ -n "$found" ] || [ "$DRY_RUN" = 1 ] || die "DroidDeck-Proton is installed ($(droiddeck_proton_folders | paste -sd, -)), but 7thDroid could not use it.
+Please report this with the log: $LOG_FILE"
   fi
   if [ -z "$found" ]; then
     [ "$DRY_RUN" = 1 ] && { warn "DroidDeck-Proton is not installed (continuing because of --dry-run)."; PROTON_NAME=DroidDeck-Proton PROTON_DIR=DroidDeck-Proton; return; }

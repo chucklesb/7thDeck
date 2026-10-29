@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """DroidDeck-Proton and the tool droiddeck-proton-run picks, answered by DroidDeck's own code.
 
+    proton_tool.py check BIN                    the DroidDeck helpers 7thDroid uses are all there
     proton_tool.py find BIN STEAM_ROOT          newest DroidDeck-Proton build: "name<TAB>dir"
     proton_tool.py chosen BIN STEAM_ROOT APPID  the tool droiddeck-proton-run uses for APPID
     proton_tool.py request BIN APPID DIR        ask DroidDeck to run APPID with the build in DIR
@@ -15,6 +16,27 @@ import runpy
 import sys
 
 OWN_PROTON = "DroidDeck-Proton"
+
+
+# What 7thDroid calls in DroidDeck's helpers. DroidDeck 0.6.7 is the first release with all of them
+# (its DroidDeck-Proton support); an older DroidDeck has to be updated.
+NEEDS = {
+    "steam-compatibility": ("tool_catalog", "build_key", "read_game_requests", "write_game_requests"),
+    "droiddeck-proton-run": ("choose_tool", "mapping", "tools"),
+}
+
+
+def check(bin_dir):
+    """The names 7thDroid needs that this DroidDeck's helpers lack, as "helper: name" lines."""
+    missing = []
+    for helper, names in NEEDS.items():
+        try:
+            module = runpy.run_path(os.path.join(bin_dir, helper))
+        except Exception as error:
+            missing.append("%s: cannot be loaded (%s)" % (helper, error))
+            continue
+        missing += ["%s: %s" % (helper, name) for name in names if not callable(module.get(name))]
+    return missing
 
 
 def compat(bin_dir):
@@ -59,6 +81,11 @@ def change_request(bin_dir, appid, value):
 
 
 def main(argv):
+    if len(argv) == 2 and argv[0] == "check":
+        missing = check(argv[1])
+        for line in missing:
+            print(line)
+        return 1 if missing else 0
     if len(argv) == 3 and argv[0] == "find":
         found = find(argv[1], argv[2])
         if not found:

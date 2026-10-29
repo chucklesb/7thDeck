@@ -337,6 +337,26 @@ check "says why" grep -q "no terminal or window to ask in" "$T/out.log"
 check "no prefix made" test ! -e "$(own_prefix)"
 cleanup
 
+echo "DroidDeck older than 0.6.7: asks for an update"
+fixture
+mkdir -p "$T/ddbin"
+cp "$DD_BIN"/* "$T/ddbin/" 2>/dev/null
+sed -i 's/^def build_key(/def _old_build_key(/' "$T/ddbin/steam-compatibility"
+export DROIDDECK_BIN=$T/ddbin DROIDDECK_PROTON_EXTRA=$T/must-not-run
+check "stops" bash -c "! bash '$REPO/install.sh' --yes --version pinned --no-steam >'$T/out.log' 2>&1"
+check "asks for DroidDeck 0.6.7 or newer" grep -q "needs DroidDeck 0.6.7 or newer" "$T/out.log"
+check "the missing piece is in the log" grep -q "steam-compatibility: build_key" "$T/.local/state/7thdroid/install.log"
+check "nothing downloaded or made" test ! -e "$(own_prefix)"
+cleanup
+
+echo "Error windows name the log once"
+fixture
+export DROIDDECK_PROTON_RUN=$T/none
+windowed install.sh
+check "installer stops" test $? -ne 0
+check "the log is named once" test "$(grep '^error' "$T/zenity.log" | grep -o 'install\.log' | wc -l)" -le 1
+cleanup
+
 echo "Missing DroidDeck"
 fixture
 export DROIDDECK_PROTON_RUN=$T/none
