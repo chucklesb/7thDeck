@@ -34,7 +34,8 @@ cp -r install.sh menu.sh lib assets LICENSE README.md VERSION AppDir/share/7thdr
 # Our AppRun replaces sharun's, so sharun's environment is applied to zenity only.
 rm -f AppDir/AppRun
 cp packaging/AppRun AppDir/AppRun
-chmod +x AppDir/AppRun AppDir/share/7thdroid/install.sh AppDir/share/7thdroid/menu.sh
+cp packaging/zenity AppDir/7thdroid-zenity
+chmod +x AppDir/AppRun AppDir/7thdroid-zenity AppDir/share/7thdroid/install.sh AppDir/share/7thdroid/menu.sh
 
 quick-sharun --make-appimage
 
@@ -48,7 +49,7 @@ cp dist/"$OUTNAME" /tmp/check/
   if [ -d squashfs-root ]; then root=$PWD/squashfs-root; else root=$PWD/AppDir; fi
   head -n 1 "$root/AppRun" | grep -qx '#!/bin/bash'
   status=0
-  xvfb-run -a "$root/bin/zenity" --info --text=7thDroid --timeout=2 || status=$?
+  APPDIR=$root xvfb-run -a "$root/7thdroid-zenity" --info --text=7thDroid --timeout=2 || status=$?
   [ "$status" -eq 5 ] || { echo "zenity did not open a window (exit $status)" >&2; exit 1; }
   bash "$root/share/7thdroid/install.sh" --help >/dev/null
 )

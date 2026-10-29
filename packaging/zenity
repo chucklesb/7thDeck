@@ -1,0 +1,8 @@
+#!/bin/sh
+# The bundled zenity, started through quick-sharun's AppRun.sh so its hooks run first (one links the
+# /tmp path zenity's data folder was patched to). Their environment stays with this zenity process.
+APPDIR=${APPDIR:-$(dirname "$(readlink -f "$0")")}
+export APPDIR
+# droiddeck-appimage-run sets ARGV0 to the app's name, which AppRun.sh would try to launch instead.
+unset ARGV0
+exec /bin/sh "$APPDIR/AppRun.sh" zenity "$@"
