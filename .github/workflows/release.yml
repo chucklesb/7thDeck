@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag vX.Y.Z (matching the VERSION file) tests 7thDroid, builds its aarch64 AppImage and
-# publishes it as a normal release, which DroidDeck's "Add an app > GitHub" installs.
+# Pushing a tag vX.Y.Z (matching the VERSION file), or running this workflow by hand on master, tests
+# 7thDroid, builds its aarch64 AppImage and publishes it as a normal release v<VERSION>, which
+# DroidDeck's "Add an app > GitHub" installs. Run by hand, the release also creates the tag.
 on:
   push:
     tags: ["v*"]
@@ -32,8 +33,13 @@ jobs:
     needs: test
     runs-on: ubuntu-24.04-arm
     container: ghcr.io/pkgforge-dev/archlinux:latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Read VERSION
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
       - name: Check the tag matches VERSION
         if: startsWith(github.ref, 'refs/tags/v')
         run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
@@ -46,7 +52,9 @@ jobs:
           path: dist/*.AppImage
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -59,12 +67,18 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; else tag=v$VERSION; fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; bump VERSION for a new one." >&2
+            exit 1
+          fi
           cat > notes.md <<'EOF'
           **7thDroid is experimental software, provided as is, without warranty of any kind. Use it at your own risk.**
 
           Install it in DroidDeck: **Desktop > Add an app > GitHub**, then enter this repository's name.
           Open the new 7thDroid tile to install 7th Heaven; open it again to launch 7th Heaven, update it, redo its shortcuts or uninstall it.
           EOF
-          gh release create "$GITHUB_REF_NAME" dist/*.AppImage --repo "$GITHUB_REPOSITORY" \
-            --title "7thDroid $GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$tag" dist/*.AppImage --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "7thDroid $tag" --notes-file notes.md
