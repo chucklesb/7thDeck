@@ -46,7 +46,7 @@ Without that, the GOG installer stops with "File not fpund". 7thDroid passes the
 
 ## Requirements
 
-- DroidDeck with Steam set up (open it once and let it finish downloading what it needs).
+- DroidDeck 0.6.7 or newer, with Steam set up (open it once and let it finish downloading what it needs). 7thDroid uses the DroidDeck-Proton support that arrived in 0.6.7; on an older DroidDeck it asks you to update first.
 - DroidDeck-Proton. If it's missing, 7thDroid offers to install the newest release with DroidDeck's `droiddeck-proton-extra`; that needs about 4 GB free.
 - Steam closed while 7thDroid sets DroidDeck-Proton for its prefix, if that turns out to be needed (it asks).
 

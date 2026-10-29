@@ -112,9 +112,11 @@ ui_progress_stop() {
 ui_error() {
   ui_progress_stop
   [ "$UI_MODE" = zenity ] || return 0
-  zen --error --no-markup --width=800 --text="$1
+  local text=$1
+  [[ $text == *"$LOG_FILE"* ]] || text="$text
 
-The log is $LOG_FILE" || true
+The log is $LOG_FILE"
+  zen --error --no-markup --width=800 --text="$text" || true
 }
 
 ui_done() {
