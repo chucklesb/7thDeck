@@ -140,7 +140,9 @@ Pushing a tag `vX.Y.Z` that matches the `VERSION` file runs `.github/workflows/r
 the tests, builds `7thDroid-X.Y.Z-aarch64.AppImage` with `packaging/build-appimage.sh` (7thDroid's
 scripts plus a zenity 3.44 bundled with [sharun](https://github.com/VHSgunzo/sharun), following
 [pkgforge-dev's Zenity AppImage](https://github.com/pkgforge-dev/Zenity-GTK3-AppImage)), and publishes
-it as a release, which is what DroidDeck's **Add an app > GitHub** installs.
+it as a release, which is what DroidDeck's **Add an app > GitHub** installs. Without a way to push
+tags, run the workflow by hand on `master` instead (**Actions > Release > Run workflow**): it does the
+same and creates the tag `v<VERSION>` itself.
 
 ## License
 
