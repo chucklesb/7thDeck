@@ -1,0 +1,49 @@
+# shellcheck shell=bash
+# Removing what 7thDroid made, and nothing else: its prefix (7th Heaven, its mods and FF7 saves made
+# through it), its launcher, its shortcuts and its downloads. Game files are never touched.
+
+# remove_tree PATH - only paths 7thDroid owns get here; refuse anything that is not one of them.
+remove_tree() {
+  local path=$1
+  case $path in
+    "$DATA_DIR" | "$CACHE_DIR" | "$APPS_DIR/$APP_ENTRY_ID") ;;
+    "$STEAM_ROOT/steamapps/compatdata/$PREFIX_ID") check_compatdata "$path" ;;
+    *) die "Internal error: refusing to remove '$path'" ;;
+  esac
+  [ -e "$path" ] || [ -L "$path" ] || return 0
+  info "Removing $path"
+  run rm -rf -- "$path"
+}
+
+uninstall() {
+  step "Uninstalling 7th Heaven"
+  local prefix=$STEAM_ROOT/steamapps/compatdata/$PREFIX_ID
+  if load_state 2>/dev/null && [ -n "${COMPATDATA:-}" ] && [ "$COMPATDATA" != "$prefix" ]; then
+    info "An older $APP_NAME installed into $COMPATDATA. That prefix is not removed; delete it yourself if you no longer need it."
+  fi
+  ask_yn "Remove 7th Heaven, its mods, and the FF7 saves made through it? Your FF7 game files are not touched." n \
+    || { info "Nothing was removed."; return 1; }
+
+  if [ -f "$APPS_DIR/$APP_ENTRY_ID/entry" ] && [ "$(readlink "$APPS_DIR/$APP_ENTRY_ID/files")" = "$DATA_DIR" ]; then
+    remove_tree "$APPS_DIR/$APP_ENTRY_ID"
+  fi
+  local desktop=${XDG_DATA_HOME:-$HOME/.local/share}/applications/7th-heaven.desktop
+  if grep -qsF "$LAUNCHER" "$desktop"; then
+    info "Removing $desktop"
+    run rm -f -- "$desktop"
+  fi
+  if [ "$HAVE_SHORTCUTS_TOOL" = 1 ]; then
+    if steam_running; then
+      warn "Steam is running, so its \"$LAUNCHER_NAME\" shortcut was left. Remove it in Steam."
+    else
+      run python "$LIB_DIR/steam_shortcut.py" remove "$SHORTCUTS_TOOL" "$STEAM_ROOT" "$LAUNCHER" \
+        || warn "Could not remove the Steam shortcut; remove it in Steam."
+    fi
+  fi
+  run python "$LIB_DIR/proton_tool.py" forget "$DROIDDECK_BIN" "$PREFIX_ID" || true
+  wait_prefix_idle "$prefix" 60 || die "Something is still running in 7th Heaven's prefix. Close 7th Heaven and FF7 first."
+  remove_tree "$prefix"
+  remove_tree "$CACHE_DIR"
+  remove_tree "$DATA_DIR"
+  ok "7th Heaven is uninstalled."
+}

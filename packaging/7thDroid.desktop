@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=7thDroid
+Comment=Installs and launches the 7th Heaven mod manager for FINAL FANTASY VII on DroidDeck
+Exec=7thDroid
+Icon=7th-heaven
+Categories=Game;
+Terminal=false

@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Test stand-in for DroidDeck's droiddeck-proton-extra: "installs" a DroidDeck-Proton build and lets
+DroidDeck's steam-compatibility (from DROIDDECK_BIN) register it, as the real one does."""
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fake_proton import make_tool  # noqa: E402
+
+steam_root, what = sys.argv[1], sys.argv[2]
+if what != "droiddeck" or os.environ.get("STUB_PROTON_EXTRA_FAIL"):
+    sys.exit("droiddeck-proton-extra stub: failing as asked")
+make_tool(os.path.join(steam_root, "compatibilitytools.d"), "DroidDeck-Proton-11-11.9")
+subprocess.call([sys.executable, os.path.join(os.environ["DROIDDECK_BIN"], "steam-compatibility"), steam_root])

@@ -1,0 +1,70 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (matching the VERSION file) tests 7thDroid, builds its aarch64 AppImage and
+# publishes it as a normal release, which DroidDeck's "Add an app > GitHub" installs.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: Droid-Deck/DroidDeck
+          path: droiddeck
+          sparse-checkout: tools/linuxfs/overlay/usr/local/bin
+      - name: Lint
+        run: shellcheck -x install.sh menu.sh packaging/AppRun tests/test_install.sh tests/stubs/droiddeck-proton-run tests/stubs/zenity && shellcheck -s sh packaging/build-appimage.sh packaging/zenity
+      - name: Unit tests
+        run: DROIDDECK_SRC=$PWD/droiddeck python3 -m unittest discover -s tests
+      - name: Installer tests
+        run: DROIDDECK_SRC=$PWD/droiddeck bash tests/test_install.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    container: ghcr.io/pkgforge-dev/archlinux:latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check the tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+      - uses: pkgforge-dev/anylinux-setup-action@0964f2258d6c93d1391359978dde081fd8b3c6af # v2
+      - name: Build the AppImage
+        run: /bin/sh packaging/build-appimage.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: AppImage-aarch64
+          path: dist/*.AppImage
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: AppImage-aarch64
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          **7thDroid is experimental software, provided as is, without warranty of any kind. Use it at your own risk.**
+
+          Install it in DroidDeck: **Desktop > Add an app > GitHub**, then enter this repository's name.
+          Open the new 7thDroid tile to install 7th Heaven; open it again to launch 7th Heaven, update it, redo its shortcuts or uninstall it.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.AppImage --repo "$GITHUB_REPOSITORY" \
+            --title "7thDroid $GITHUB_REF_NAME" --notes-file notes.md
