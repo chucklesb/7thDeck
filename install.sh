@@ -78,7 +78,7 @@ done
 ui_init
 start_log
 ui_progress_start
-trap ui_progress_stop EXIT
+trap 'ui_progress_stop; finish_log' EXIT
 printf '%s%s%s - 7th Heaven for FINAL FANTASY VII on DroidDeck\n' "$C_BOLD" "$APP_NAME" "$C_RESET"
 info "Log: $LOG_FILE"
 [ "$DRY_RUN" = 1 ] && info "Dry run: nothing will be changed."

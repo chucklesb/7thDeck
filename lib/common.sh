@@ -18,10 +18,21 @@ else
   C_BOLD='' C_DIM='' C_RED='' C_GREEN='' C_YELLOW='' C_RESET=''
 fi
 
+LOG_TEE_PID=''
+
 start_log() {
   mkdir -p "$STATE_DIR"
   : > "$LOG_FILE"
   exec > >(tee -a "$LOG_FILE") 2>&1
+  LOG_TEE_PID=$!
+}
+
+# At exit: let tee write out everything before the script is gone, so the log and the screen end with
+# the last message (an error, usually) rather than stopping short of it.
+finish_log() {
+  [ -n "$LOG_TEE_PID" ] || return 0
+  exec >&- 2>&-
+  wait "$LOG_TEE_PID" 2>/dev/null || true
 }
 
 step()  { printf '\n%s==> %s%s\n' "$C_BOLD" "$*" "$C_RESET"; UI_STEP=$*; ui_progress "$*"; }
