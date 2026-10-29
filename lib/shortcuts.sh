@@ -82,7 +82,10 @@ add_steam_shortcut() {
 # offer_shortcuts - each entry is optional; flags preset the answer.
 offer_shortcuts() {
   step "Adding shortcuts"
-  want_entry WANT_APP_ENTRY "Add 7th Heaven to the DroidDeck app's Desktop page?" && add_app_entry
+  # The 7thDroid AppImage's own tile already launches 7th Heaven, so a second one is opt-in there.
+  local app_default=y
+  [ -n "${SEVENTHDROID_APPIMAGE:-}" ] && app_default=n
+  want_entry WANT_APP_ENTRY "Also add a separate 7th Heaven tile to the DroidDeck app's Desktop page?" "$app_default" && add_app_entry
   want_entry WANT_STEAM "Add 7th Heaven to Steam as a non-Steam game?" && add_steam_shortcut
   want_entry WANT_DESKTOP "Add 7th Heaven to the KDE desktop's application menu?" && add_desktop_entry
   return 0
@@ -93,5 +96,5 @@ want_entry() {
     1) return 0 ;;
     0) return 1 ;;
   esac
-  ask_yn "$2" y
+  ask_yn "$2" "${3:-y}"
 }

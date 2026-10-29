@@ -1,5 +1,15 @@
 # 7thDroid
 
+> [!WARNING]
+> **THIS SOFTWARE IS EXPERIMENTAL.** It is provided "as is", without warranty of any kind, express or
+> implied. The authors and contributors accept no liability for any damage, data loss, lost saves or
+> other problems arising from its use. It changes files on your device, downloads and runs third-party
+> software (7th Heaven, .NET, DroidDeck-Proton), and has had very little testing. Back up anything you
+> care about first, and use it at your own risk. See the [license](LICENSE) for the full terms.
+>
+> 7thDroid is not affiliated with or endorsed by Square Enix, Valve, GOG, the Tsunamods / 7th Heaven
+> team or the DroidDeck project.
+
 Installs the [7th Heaven](https://github.com/tsunamods-codes/7th-Heaven) mod manager for FINAL FANTASY VII on
 [DroidDeck](https://github.com/Droid-Deck/DroidDeck), the Android app that runs Steam and Windows games with
 Valve's ARM64 Proton and FEX.
@@ -46,19 +56,42 @@ Without that, the GOG installer stops with "File not fpund". 7thDroid passes the
 - **Game files:** 7th Heaven itself writes into the game folder on first run (for the 2026 and GOG releases, `ff7/workingdir` and its own patched `ff7_en.exe`), as it does on Windows. Steam's "Verify integrity of game files" restores the originals.
 - **Disc folders you supply are never written to:** 7thDroid maps them as CD drives through small folders of links under `~/.local/share/7thdroid/cd/`.
 
-## Usage
+## Installing
 
-Shared Android storage is mounted `noexec`, so run the script with `bash`:
+### The easy way: from the DroidDeck app
 
-1. Download this repository and unpack it, for example into `/root/Storage/Download/7thDroid`. That folder is Android's Downloads folder.
-2. Open Konsole on the DroidDeck desktop. You can also add `install.sh` as a Script app on the Desktop page.
-3. Run:
+1. In DroidDeck, open **Desktop > Add an app > GitHub**.
+2. Enter `chucklesb/7thDroid`. DroidDeck downloads the newest 7thDroid AppImage from this repository's
+   releases and adds a **7thDroid** tile to the Desktop page.
+3. Open the tile. 7thDroid asks its questions in on-screen windows: which copy of FF7 to use, which
+   7th Heaven build, and which shortcuts to add. A file picker opens in Android's Downloads folder when
+   you need to point it at an installer or disc images.
+4. Open the tile again whenever you like. Once 7th Heaven is installed it offers a menu:
+   **Launch 7th Heaven**, **Update or repair 7th Heaven**, **Add or redo shortcuts**, **Show the last
+   log** and **Uninstall 7th Heaven**.
+
+To update 7thDroid itself, update the tile from the Desktop page when a new release is out; your 7th
+Heaven install is kept.
+
+Uninstalling removes 7th Heaven's prefix (7th Heaven, its mods, and the FF7 saves made through it), its
+launcher, its shortcuts and its downloads. Your FF7 game files are never touched.
+
+### From a terminal
+
+Shared Android storage is mounted `noexec`, so run the script with `bash` from a terminal such as
+Konsole on DroidDeck's KDE desktop:
+
+1. Download this repository and unpack it, for example into `/root/Storage/Download/7thDroid`
+   (Android's Downloads folder).
+2. Run:
 
 ```bash
 bash /root/Storage/Download/7thDroid/install.sh
 ```
 
 Then start 7th Heaven from the shortcuts you added, or with `bash ~/.local/share/7thdroid/"7th Heaven.sh"`.
+The questions are typed answers there, so the script needs a terminal; on the Desktop page, use the
+AppImage instead.
 
 ### Options
 
@@ -69,6 +102,7 @@ Then start 7th Heaven from the shortcuts you added, or with `bash ~/.local/share
 | `--game-dir DIR` | Where a GOG installer puts the game (default `~/Games/FINAL FANTASY VII`). |
 | `--app-entry`, `--steam`, `--desktop` (and `--no-…`) | Add or skip each shortcut without asking. |
 | `--shortcuts-only` | Only recreate the launcher and shortcuts, for example after closing Steam. |
+| `--uninstall` | Remove 7th Heaven's prefix, launcher, shortcuts and downloads (not the game). |
 | `--winetricks-dinput` | Also run winetricks' `dinput` verb, if a Proton build that ships protonfixes is installed (e.g. DroidDeck-Proton). |
 | `--reinstall` | Run every step again. |
 | `--yes` | Accept every default without asking. |
@@ -97,8 +131,16 @@ DROIDDECK_SRC=../DroidDeck python3 -m unittest discover -s tests
 ```
 
 ```bash
-shellcheck -x install.sh
+shellcheck -x install.sh menu.sh
 ```
+
+### Releases
+
+Pushing a tag `vX.Y.Z` that matches the `VERSION` file runs `.github/workflows/release.yml`: it runs
+the tests, builds `7thDroid-X.Y.Z-aarch64.AppImage` with `packaging/build-appimage.sh` (7thDroid's
+scripts plus a zenity 3.44 bundled with [sharun](https://github.com/VHSgunzo/sharun), following
+[pkgforge-dev's Zenity AppImage](https://github.com/pkgforge-dev/Zenity-GTK3-AppImage)), and publishes
+it as a release, which is what DroidDeck's **Add an app > GitHub** installs.
 
 ## License
 

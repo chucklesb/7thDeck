@@ -19,9 +19,32 @@ is_cd_folder() {
     || compgen -G "$dir/[Ff][Ff]7*/" >/dev/null
 }
 
+# pick_source ARRAY - the same choices as a typed path, with a file picker that starts in Downloads.
+pick_source() {
+  local -n __paths=$1
+  local kind reply
+  choose kind "Where is your copy of FINAL FANTASY VII?" \
+    "An installed game folder (copied from a PC or another launcher)" \
+    "A GOG installer (setup_final_fantasy_vii_....exe)" \
+    "1998 CD-ROM disc images (.iso)" \
+    "Folders copied from the 1998 CD-ROMs"
+  case $kind in
+    0) ui_paths reply "Choose the folder that holds FF7's .exe" folder ;;
+    1) ui_paths reply "Choose the GOG installer" file "GOG installer | *.exe *.EXE" ;;
+    2) ui_paths reply "Choose the disc images (select all discs)" files "Disc images | *.iso *.ISO" ;;
+    3) ui_paths reply "Choose the disc folders (select all discs)" folders ;;
+  esac
+  mapfile -t __paths <<< "$reply"
+  [ -n "${__paths[0]:-}" ] || __paths=()
+}
+
 manual_source() {
   local paths=("$@") path exe isos=() dirs=()
   while [ ${#paths[@]} -eq 0 ]; do
+    if [ "$UI_MODE" = zenity ] && [ "$ASSUME_YES" != 1 ]; then
+      pick_source paths
+      continue
+    fi
     info "No installed copy of FINAL FANTASY VII was found automatically."
     info "Enter the path to one of the following (Android's Downloads folder is /root/Storage/Download):"
     info "  - an installed FF7 folder (from a PC, a store, etc.)"

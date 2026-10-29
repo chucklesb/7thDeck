@@ -3,6 +3,7 @@
 
     steam_shortcut.py appid EXE NAME
     steam_shortcut.py add TOOL STEAM_ROOT NAME EXE START_DIR [ICON]
+    steam_shortcut.py remove TOOL STEAM_ROOT EXE
 
 appid prints the id Steam gives a shortcut to EXE named NAME (the same CRC droiddeck-proton-run uses).
 add writes the shortcut into the most recent account's shortcuts.vdf, replacing an earlier one for
@@ -22,8 +23,7 @@ def appid(exe, name):
     return zlib.crc32(('"%s"%s' % (exe, name)).encode("utf-8")) | SHORTCUT_BIT
 
 
-def add(tool_path, steam_root, name, exe, start, icon=""):
-    tool = runpy.run_path(tool_path)
+def load(tool, steam_root):
     account = tool["account_dir"](steam_root)
     if not account:
         raise SystemExit("steam_shortcut.py: no Steam account found; sign in to Steam once first")
@@ -35,25 +35,47 @@ def add(tool_path, steam_root, name, exe, start, icon=""):
         if data:
             shortcuts = tool["parse"](data).get("shortcuts", {})
         shutil.copy2(path, path + ".7thdroid.bak")
-    number = appid(exe, name)
-    entry = tool["shortcut"]({"appid": number, "name": name, "exe": exe, "dir": start,
-                              "art": {"icon": icon}}, launch_options="")
-    entry["tags"] = {}
+    return path, shortcuts
+
+
+def others(shortcuts, exe, number=None):
+    """The shortcuts that are not 7thDroid's launcher."""
     kept = []
     for value in shortcuts.values():
         if not isinstance(value, dict):
             continue
         same = value.get("Exe", value.get("exe", "")).strip('"') == exe
-        if same or (value.get("appid", value.get("AppId", 0)) or 0) & 0xFFFFFFFF == number:
+        if same or number is not None and (value.get("appid", value.get("AppId", 0)) or 0) & 0xFFFFFFFF == number:
             continue
         kept.append(value)
-    kept.append(entry)
+    return kept
+
+
+def save(tool, path, kept):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(tool["write"]({"shortcuts": {str(i): v for i, v in enumerate(kept)}}))
     os.replace(tmp, path)
+
+
+def add(tool_path, steam_root, name, exe, start, icon=""):
+    tool = runpy.run_path(tool_path)
+    path, shortcuts = load(tool, steam_root)
+    number = appid(exe, name)
+    entry = tool["shortcut"]({"appid": number, "name": name, "exe": exe, "dir": start,
+                              "art": {"icon": icon}}, launch_options="")
+    entry["tags"] = {}
+    save(tool, path, others(shortcuts, exe, number) + [entry])
     return number
+
+
+def remove(tool_path, steam_root, exe):
+    tool = runpy.run_path(tool_path)
+    path, shortcuts = load(tool, steam_root)
+    kept = others(shortcuts, exe)
+    if len(kept) != len([v for v in shortcuts.values() if isinstance(v, dict)]):
+        save(tool, path, kept)
 
 
 def main(argv):
@@ -62,6 +84,9 @@ def main(argv):
         return 0
     if len(argv) in (6, 7) and argv[0] == "add":
         print(add(*argv[1:]))
+        return 0
+    if len(argv) == 4 and argv[0] == "remove":
+        remove(*argv[1:])
         return 0
     print(__doc__, file=sys.stderr)
     return 2

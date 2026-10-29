@@ -24,12 +24,12 @@ start_log() {
   exec > >(tee -a "$LOG_FILE") 2>&1
 }
 
-step()  { printf '\n%s==> %s%s\n' "$C_BOLD" "$*" "$C_RESET"; }
-info()  { printf '    %s\n' "$*"; }
-ok()    { printf '    %s%s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
+step()  { printf '\n%s==> %s%s\n' "$C_BOLD" "$*" "$C_RESET"; UI_STEP=$*; ui_progress "$*"; }
+info()  { printf '    %s\n' "$*"; ui_progress "$UI_STEP: $*"; }
+ok()    { printf '    %s%s%s\n' "$C_GREEN" "$*" "$C_RESET"; ui_progress "$UI_STEP: $*"; }
 warn()  { printf '    %sWarning:%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 debug() { printf '    %s%s%s\n' "$C_DIM" "$*" "$C_RESET" >> "${LOG_FILE:-/dev/null}"; }
-die()   { printf '\n%sError:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+die()   { printf '\n%sError:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; ui_error "$*"; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -45,30 +45,45 @@ run() {
   "$@"
 }
 
+# Asking needs a terminal or zenity; without either only --yes runs can go on.
+can_ask() {
+  [ "$UI_MODE" != none ] || die "There is no terminal or window to ask in. Run this from a terminal, or use the 7thDroid AppImage."
+}
+
 # ask VAR "Question" [default]
 ask() {
-  local __var=$1 question=$2 default=${3:-} reply
+  local __var=$1 question=$2 default=${3:-} __reply
   if [ "$ASSUME_YES" = 1 ]; then
     printf -v "$__var" '%s' "$default"
     info "$question ${default:+[$default]} (--yes)"
     return
   fi
-  read -r -e -p "    $question${default:+ [$default]}: " reply || reply=
-  printf -v "$__var" '%s' "${reply:-$default}"
+  can_ask
+  if [ "$UI_MODE" = zenity ]; then
+    ui_ask "$__var" "$question" "$default"
+    return
+  fi
+  read -r -e -p "    $question${default:+ [$default]}: " __reply || __reply=
+  printf -v "$__var" '%s' "${__reply:-$default}"
 }
 
 # ask_yn "Question" y|n -> status 0 for yes
 ask_yn() {
-  local question=$1 default=${2:-y} reply hint
+  local question=$1 default=${2:-y} __reply hint
   [ "$default" = y ] && hint='Y/n' || hint='y/N'
   if [ "$ASSUME_YES" = 1 ]; then
     info "$question [$hint] (--yes: $default)"
     [ "$default" = y ]
     return
   fi
+  can_ask
+  if [ "$UI_MODE" = zenity ]; then
+    ui_ask_yn "$question" "$default"
+    return
+  fi
   while true; do
-    read -r -p "    $question [$hint]: " reply || reply=
-    case ${reply:-$default} in
+    read -r -p "    $question [$hint]: " __reply || __reply=
+    case ${__reply:-$default} in
       [Yy]*) return 0 ;;
       [Nn]*) return 1 ;;
     esac
@@ -77,7 +92,7 @@ ask_yn() {
 
 # choose VAR "Question" option... -> VAR gets the 0-based index; the first option is the default.
 choose() {
-  local __var=$1 question=$2 i reply
+  local __var=$1 question=$2 i __reply
   shift 2
   info "$question"
   i=1
@@ -91,11 +106,16 @@ choose() {
     info "Using 1) $1"
     return
   fi
+  can_ask
+  if [ "$UI_MODE" = zenity ]; then
+    ui_choose "$__var" "$question" "$@"
+    return
+  fi
   while true; do
-    read -r -p "    Choose 1-$#: [1] " reply || reply=
-    reply=${reply:-1}
-    if [[ $reply =~ ^[0-9]+$ ]] && [ "$reply" -ge 1 ] && [ "$reply" -le $# ]; then
-      printf -v "$__var" '%s' $((reply - 1))
+    read -r -p "    Choose 1-$#: [1] " __reply || __reply=
+    __reply=${__reply:-1}
+    if [[ $__reply =~ ^[0-9]+$ ]] && [ "$__reply" -ge 1 ] && [ "$__reply" -le $# ]; then
+      printf -v "$__var" '%s' $((__reply - 1))
       return
     fi
   done
@@ -103,6 +123,8 @@ choose() {
 
 pause() {
   [ "$ASSUME_YES" = 1 ] && return
+  can_ask
+  [ "$UI_MODE" = zenity ] && { ui_pause "$*"; return; }
   read -r -p "    $* Press Enter to continue... " _ || true
 }
 
@@ -147,3 +169,6 @@ load_state() {
   # shellcheck disable=SC1090
   . "$STATE_FILE"
 }
+
+# shellcheck source=lib/ui.sh
+. "$(dirname "${BASH_SOURCE[0]}")/ui.sh"

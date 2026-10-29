@@ -20,6 +20,8 @@ ASSETS_DIR=$ROOT_DIR/assets
 . "$LIB_DIR/seventh_heaven.sh"
 # shellcheck source=lib/shortcuts.sh
 . "$LIB_DIR/shortcuts.sh"
+# shellcheck source=lib/uninstall.sh
+. "$LIB_DIR/uninstall.sh"
 
 usage() {
   cat <<EOF
@@ -33,6 +35,7 @@ Usage: bash install.sh [options]
   --steam / --no-steam             Add (or skip) the Steam non-Steam-game shortcut
   --desktop / --no-desktop         Add (or skip) the KDE menu entry
   --shortcuts-only                 Only (re)create the launcher and shortcuts for the last install
+  --uninstall                      Remove 7th Heaven's prefix, launcher, shortcuts and downloads
   --winetricks-dinput              Also run winetricks' dinput verb, when a Proton with protonfixes exists
   --reinstall                      Run every step again, even ones that look done
   --yes                            Accept every default without asking
@@ -41,7 +44,7 @@ Usage: bash install.sh [options]
 EOF
 }
 
-SEVENTH_CHANNEL='' SOURCES=() GAME_DIR='' REINSTALL=0 SHORTCUTS_ONLY=0 WINETRICKS_DINPUT=0
+SEVENTH_CHANNEL='' SOURCES=() GAME_DIR='' REINSTALL=0 SHORTCUTS_ONLY=0 UNINSTALL=0 WINETRICKS_DINPUT=0
 WANT_APP_ENTRY='' WANT_STEAM='' WANT_DESKTOP=''
 CD_DISCS=() CD_DRIVES=()
 
@@ -61,6 +64,7 @@ while [ $# -gt 0 ]; do
     --desktop) WANT_DESKTOP=1 ;;
     --no-desktop) WANT_DESKTOP=0 ;;
     --shortcuts-only) SHORTCUTS_ONLY=1 ;;
+    --uninstall) UNINSTALL=1 ;;
     --winetricks-dinput) WINETRICKS_DINPUT=1 ;;
     --reinstall) REINSTALL=1 ;;
     --yes|-y) ASSUME_YES=1 ;;
@@ -71,7 +75,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+ui_init
 start_log
+ui_progress_start
+trap ui_progress_stop EXIT
 printf '%s%s%s - 7th Heaven for FINAL FANTASY VII on DroidDeck\n' "$C_BOLD" "$APP_NAME" "$C_RESET"
 info "Log: $LOG_FILE"
 [ "$DRY_RUN" = 1 ] && info "Dry run: nothing will be changed."
@@ -82,11 +89,17 @@ preflight
 PREFIX_ID=$(dedicated_prefix_id) || die "Could not work out 7thDroid's prefix id."
 DEDICATED=$(compatdata_for "$PREFIX_ID")
 
+if [ "$UNINSTALL" = 1 ]; then
+  uninstall && ui_done "7th Heaven is uninstalled. Your FF7 game files were not touched."
+  exit 0
+fi
+
 if [ "$SHORTCUTS_ONLY" = 1 ]; then
   load_state || die "No earlier install found ($STATE_FILE). Run the full installer first."
   [ "$COMPATDATA" = "$DEDICATED" ] || die "The last install was made by an older $APP_NAME. Run the full installer once."
   write_launcher "$(seventh_exe "$COMPATDATA")"
   offer_shortcuts
+  ui_done "The 7th Heaven shortcuts are up to date."
   exit 0
 fi
 
@@ -174,3 +187,6 @@ ok "7th Heaven $SEVENTH_TAG is installed for $FF7_VERSION FINAL FANTASY VII."
 info "Start it with: bash \"$LAUNCHER\" (or the shortcuts you added)."
 info "Prefix: $COMPATDATA"
 info "Log: $LOG_FILE"
+ui_done "7th Heaven $SEVENTH_TAG is installed for $FF7_VERSION FINAL FANTASY VII.
+
+Open 7thDroid again to launch it."

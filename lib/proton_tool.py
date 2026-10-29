@@ -4,6 +4,7 @@
     proton_tool.py find BIN STEAM_ROOT          newest DroidDeck-Proton build: "name<TAB>dir"
     proton_tool.py chosen BIN STEAM_ROOT APPID  the tool droiddeck-proton-run uses for APPID
     proton_tool.py request BIN APPID DIR        ask DroidDeck to run APPID with the build in DIR
+    proton_tool.py forget BIN APPID             drop that request again
 
 BIN is the folder holding steam-compatibility and droiddeck-proton-run (normally /usr/local/bin).
 request adds the same per-game entry the DroidDeck app writes when a game's Proton is picked in it
@@ -37,11 +38,21 @@ def chosen(bin_dir, steam_root, appid):
 
 
 def request(bin_dir, appid, directory):
+    return change_request(bin_dir, appid, {"valve": False, "dir": directory})
+
+
+def change_request(bin_dir, appid, value):
+    """Sets (or with None removes) APPID's entry, keeping every other game's."""
     c = compat(bin_dir)
     for _ in range(3):
         games, original = c["read_game_requests"]()
         games = dict(games)
-        games[str(appid)] = {"valve": False, "dir": directory}
+        if value is None:
+            if str(appid) not in games:
+                return True
+            del games[str(appid)]
+        else:
+            games[str(appid)] = value
         if c["write_game_requests"](games, original):
             return True
     return False
@@ -59,6 +70,8 @@ def main(argv):
         return 0
     if len(argv) == 4 and argv[0] == "request":
         return 0 if request(argv[1], argv[2], argv[3]) else 1
+    if len(argv) == 3 and argv[0] == "forget":
+        return 0 if change_request(argv[1], argv[2], None) else 1
     print(__doc__, file=sys.stderr)
     return 2
 

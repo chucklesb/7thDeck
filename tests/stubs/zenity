@@ -1,0 +1,28 @@
+#!/bin/bash
+# Test stand-in for zenity: records each call in STUB_ZENITY_LOG and answers from STUB_ZENITY_ANSWERS,
+# one line per window that takes an answer:
+#   cancel      the window is cancelled (exit 1); for --question this is "No"
+#   anything    printed as the window's answer (exit 0); for --question any other line is "Yes"
+# --progress windows record what they are sent; --info, --error and --text-info just return.
+kind=
+for arg in "$@"; do
+  case $arg in
+    --entry|--question|--list|--file-selection|--progress|--info|--error|--text-info) kind=${arg#--} ;;
+  esac
+done
+{ printf '%s' "$kind"; printf ' %q' "$@"; printf '\n'; } >> "$STUB_ZENITY_LOG"
+case $kind in
+  progress)
+    while IFS= read -r line; do printf 'progress-line %s\n' "$line" >> "$STUB_ZENITY_LOG"; done
+    exit 0 ;;
+  info|error|text-info) exit 0 ;;
+esac
+counter=$STUB_ZENITY_ANSWERS.n
+n=$(cat "$counter" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$counter"
+answer=$(sed -n "${n}p" "$STUB_ZENITY_ANSWERS")
+printf 'answer %s\n' "$answer" >> "$STUB_ZENITY_LOG"
+[ "$answer" = cancel ] && exit 1
+[ "$kind" = question ] && exit 0
+printf '%s\n' "$answer"

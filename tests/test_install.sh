@@ -253,6 +253,90 @@ check "falls back to the known .NET 9 patch" grep -q "windowsdesktop-runtime-9.0
 check "7th Heaven confirmed on .NET 9" grep -q "runs on .NET Desktop 9.0, which is installed" "$T/out.log"
 cleanup
 
+# windowed SCRIPT ANSWER... -> runs SCRIPT (with ARGS) as the AppImage does: no terminal, the zenity stub
+windowed() {
+  local script=$1
+  shift
+  printf '%s\n' "$@" > "$T/answers"
+  rm -f "$T/answers.n"
+  : > "$T/zenity.log"
+  UI_ZENITY=$REPO/tests/stubs/zenity STUB_ZENITY_LOG=$T/zenity.log STUB_ZENITY_ANSWERS=$T/answers SEVENTHDROID_APPIMAGE=1 \
+    timeout 300 bash "$REPO/$script" "${ARGS[@]}" < /dev/null > "$T/out.log" 2>&1
+}
+
+heroic_game() {
+  mkdir -p "$T/Games/Heroic/FINAL FANTASY VII" "$T/.config/heroic/gog_store"
+  touch "$T/Games/Heroic/FINAL FANTASY VII/FFVII.exe"
+  printf '{"installed":[{"appName":"1698970154","install_path":"%s"}]}' "$T/Games/Heroic/FINAL FANTASY VII" \
+    > "$T/.config/heroic/gog_store/installed.json"
+}
+
+echo "Windows instead of a terminal (AppImage), then its menu"
+fixture
+heroic_game
+ARGS=(--version pinned)
+check "installer succeeds" windowed install.sh 0 yes cancel yes
+CD=$(own_prefix)
+check "copies offered in a list" grep -q '^list .*--radiolist' "$T/zenity.log"
+check "progress window shows the steps" grep -q '^progress-line # Installing 7th Heaven' "$T/zenity.log"
+check "app tile is opt-in from the AppImage" bash -c "grep '^question' '$T/zenity.log' | grep -F 'separate\\ 7th\\ Heaven\\ tile' | grep -q -- --default-cancel"
+check "app tile added when answered yes" test -f "$T/opt/droiddeck-apps/7thheaven/entry"
+check "Steam shortcut skipped when answered no" test ! -e "$STEAM_ROOT/userdata/12345/config/shortcuts.vdf"
+check "KDE entry added" test -f "$T/.local/share/applications/7th-heaven.desktop"
+check "says it is done" grep -q '^info .*is installed for GOG' "$T/zenity.log"
+ARGS=()
+: > "$STUB_LOG"
+check "menu: launch" windowed menu.sh 0
+check "menu launched 7th Heaven in its prefix" grep -q $'^waitforexitandrun\t'"${CD##*/}"$'\t7th Heaven.exe' "$STUB_LOG"
+check "menu: uninstall declined" windowed menu.sh 4 cancel 5
+check "declining keeps everything" test -f "$CD/pfx/drive_c/7th Heaven/7th Heaven.exe"
+before=$(other_prefixes)
+check "menu: uninstall" windowed menu.sh 4 yes
+check "prefix removed" test ! -e "$CD"
+check "launcher and state removed" test ! -e "$T/.local/share/7thdroid"
+check "downloads removed" test ! -e "$T/.cache/7thdroid"
+check "app tile removed" test ! -e "$T/opt/droiddeck-apps/7thheaven"
+check "KDE entry removed" test ! -e "$T/.local/share/applications/7th-heaven.desktop"
+check "game files kept" test -f "$T/Games/Heroic/FINAL FANTASY VII/FFVII.exe"
+check "other prefixes untouched" test "$(other_prefixes)" = "$before"
+check "DroidDeck's Proton choice for the prefix removed" bash -c "! grep -qs '${CD##*/}' '$T/.local/share/droiddeck-compat/games.json'"
+cleanup
+
+echo "Windows: picking a GOG installer"
+fixture
+mkdir -p "$T/Download"
+echo stub > "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe"
+ARGS=(--version pinned --no-app-entry --no-steam --no-desktop)
+check "installer succeeds" windowed install.sh 1 "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe" "$T/Games/FF7"
+check "file picker filtered to installers" grep -q '^file-selection .*--file-filter=GOG\\ installer' "$T/zenity.log"
+check "game installed where chosen" test -f "$T/Games/FF7/FFVII.exe"
+cleanup
+
+echo "Windows: cancelling"
+fixture
+heroic_game
+ARGS=(--version pinned)
+windowed install.sh cancel
+check "cancel stops the installer" test $? -eq 130
+check "no prefix made" test ! -e "$(own_prefix)"
+cleanup
+
+echo "Typed answers: a path to an installed game"
+fixture
+mkdir -p "$T/My FF7"
+touch "$T/My FF7/FFVII.exe" "$T/My FF7/goggame-1698970154.info"
+check "installer succeeds" bash -c "printf '%s\n' \"'$T/My FF7'\" | UI_MODE=tty timeout 300 bash '$REPO/install.sh' --version pinned --no-app-entry --no-steam --no-desktop > '$T/out.log' 2>&1"
+check "uses the typed folder" grep -qF "Game: $T/My FF7/FFVII.exe" "$T/out.log"
+cleanup
+
+echo "No terminal and no windows"
+fixture
+heroic_game
+check "refuses instead of taking defaults" bash -c "! bash '$REPO/install.sh' --version pinned < /dev/null > '$T/out.log' 2>&1"
+check "says why" grep -q "no terminal or window to ask in" "$T/out.log"
+check "no prefix made" test ! -e "$(own_prefix)"
+cleanup
+
 echo "Missing DroidDeck"
 fixture
 export DROIDDECK_PROTON_RUN=$T/none
