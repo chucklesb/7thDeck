@@ -45,9 +45,8 @@ cp dist/"$OUTNAME" /tmp/check/
 (
   cd /tmp/check
   ./"$OUTNAME" --appimage-extract >/dev/null
-  root=$(readlink -f squashfs-root 2>/dev/null || readlink -f AppDir)
+  if [ -d squashfs-root ]; then root=$PWD/squashfs-root; else root=$PWD/AppDir; fi
   head -n 1 "$root/AppRun" | grep -qx '#!/bin/bash'
-  "$root/bin/zenity" --version
   status=0
   xvfb-run -a "$root/bin/zenity" --info --text=7thDroid --timeout=2 || status=$?
   [ "$status" -eq 5 ] || { echo "zenity did not open a window (exit $status)" >&2; exit 1; }
