@@ -31,7 +31,7 @@ fixture() {
   export DROIDDECK_APPS_DIR=$T/opt/droiddeck-apps
   export DROIDDECK_BIN=$DD_BIN DROIDDECK_PROTON_EXTRA=$REPO/tests/stubs/droiddeck-proton-extra
   export DOTNET_METADATA=file://$REPO/tests/fixtures/dotnet
-  unset STUB_PROTON_EXTRA_FAIL DROIDDECK_STEAM_SHORTCUTS STUB_7H_DOTNET
+  unset STUB_PROTON_EXTRA_FAIL DROIDDECK_STEAM_SHORTCUTS STUB_7H_DOTNET STUB_INNO_LAYOUT
   mkdir -p "$STEAM_ROOT/steamapps" "$DROIDDECK_APPS_DIR" "$STEAM_ROOT/config" "$STEAM_ROOT/userdata/12345/config"
   cp "$REPO/tests/fixtures/config.vdf" "$STEAM_ROOT/config/config.vdf"
   printf '"users"\n{\n\t"76561197960278073"\n\t{\n\t\t"MostRecent"\t"1"\n\t}\n}\n' > "$STEAM_ROOT/config/loginusers.vdf"
@@ -91,9 +91,9 @@ check "installers ran in 7thDroid's own prefix" grep -q $'run\t'"${CD##*/}"$'\t7
 check "nothing ran in another prefix" bash -c "! cut -f2 '$STUB_LOG' | grep -vqx '${CD##*/}'"
 check "installers ran with full x87 precision" bash -c "! cut -f4 '$STUB_LOG' | grep -vqx 0"
 check "DroidDeck-Proton pinned to the prefix" grep -q "${CD##*/}" "$T/.local/share/droiddeck-compat/games.json"
-check ".NET 9 x64 for the pinned build" test -d "$CD/pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/9.0.22"
+check ".NET 9 x64 for the pinned build (ARM64 layout)" test -d "$CD/pfx/drive_c/Program Files/dotnet/x64/shared/Microsoft.WindowsDesktop.App/9.0.22"
 check ".NET 9 x86 for the pinned build" test -d "$CD/pfx/drive_c/Program Files (x86)/dotnet/shared/Microsoft.WindowsDesktop.App/9.0.22"
-check "no .NET 10" test ! -e "$CD/pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.14"
+check "no .NET 10" test ! -e "$CD/pfx/drive_c/Program Files/dotnet/x64/shared/Microsoft.WindowsDesktop.App/10.0.14"
 check ".NET installed before 7th Heaven" bash -c "grep -n . '$STUB_LOG' | grep -m1 -q '^1:.*windowsdesktop-runtime-9.0.22-win-x64'"
 check "Avalon.Graphics in user.reg" grep -q '"DisableHWAcceleration"=dword:00000001' "$CD/pfx/user.reg"
 check "dinput override in user.reg" grep -q '"dinput"="native,builtin"' "$CD/pfx/user.reg"
@@ -158,6 +158,49 @@ echo stub > "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe"
 check "installer succeeds" installer --no-steam --source "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe" --game-dir "$T/Games/FF7"
 check "GOG installer ran with full x87 precision" grep -q $'\tsetup_final_fantasy_vii_2.0_(gog).exe\t0\t' "$STUB_LOG"
 check "game installed where asked" test -f "$T/Games/FF7/FFVII.exe"
+cleanup
+
+echo "GOG installer unpacked with innoextract"
+fixture
+export DROIDDECK_INNOEXTRACT=$REPO/tests/stubs/innoextract
+mkdir -p "$T/Download" "$T/Games/FF7"
+echo stub > "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe"
+touch "$T/Games/FF7/webcache.zip"   # left by an earlier, failed unpack
+check "installer succeeds" installer --no-steam --source "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe" --game-dir "$T/Games/FF7"
+check "the GOG installer was not run" bash -c "! grep -q setup_final_fantasy '$STUB_LOG'"
+check "game at the top of the folder" test -f "$T/Games/FF7/FFVII.exe" -a -f "$T/Games/FF7/data/movies.lgp"
+check "GOG support files merged in" test -f "$T/Games/FF7/goggame-1698970154.ico" -a -f "$T/Games/FF7/webcache.zip"
+check "no app/ or tmp/ folder" test ! -e "$T/Games/FF7/app" -a ! -e "$T/Games/FF7/tmp"
+check "no staging folder left" bash -c "! compgen -G '$T/Games/FF7.*'"
+check "FF7Exe is the unpacked FFVII.exe" grep -qF "<FF7Exe>Z:${T//\//\\}\\Games\\FF7\\FFVII.exe</FF7Exe>" <(settings "$(own_prefix)")
+cleanup
+
+echo "GOG installer unpacked with the game under app/"
+fixture
+export DROIDDECK_INNOEXTRACT=$REPO/tests/stubs/innoextract STUB_INNO_LAYOUT=app
+mkdir -p "$T/Download"
+echo stub > "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe"
+check "installer succeeds" installer --no-steam --source "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe" --game-dir "$T/Games/FF7"
+check "game moved out of app/" test -f "$T/Games/FF7/FFVII.exe" -a -f "$T/Games/FF7/goggame-1698970154.ico"
+check "no tmp/ folder" test ! -e "$T/Games/FF7/tmp"
+cleanup
+
+echo "GOG installer whose unpacked files have no game"
+fixture
+export DROIDDECK_INNOEXTRACT=$REPO/tests/stubs/innoextract STUB_INNO_LAYOUT=empty
+mkdir -p "$T/Download"
+echo stub > "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe"
+check "installer succeeds" installer --no-steam --source "$T/Download/setup_final_fantasy_vii_2.0_(gog).exe" --game-dir "$T/Games/FF7"
+check "the GOG installer was run instead" grep -q $'\tsetup_final_fantasy_vii_2.0_(gog).exe\t0\t' "$STUB_LOG"
+check "the unpacked files are listed in the log" grep -q "goggame-1698970154.ico" "$T/.local/state/7thdroid/install.log"
+cleanup
+
+echo ".NET in the x64-native layout is recognised"
+fixture
+mkdir -p "$T/FF7" "$(own_prefix)/pfx/drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/9.0.5"
+touch "$T/FF7/FFVII.exe"
+check "installer succeeds" installer --no-steam --source "$T/FF7"
+check "the x64 runtime was not installed again" bash -c "! grep -q 'win-x64' '$STUB_LOG'"
 cleanup
 
 echo "1998 CD-ROM from disc folders"

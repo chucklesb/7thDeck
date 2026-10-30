@@ -127,19 +127,47 @@ unpack_gog_setup() {
     run rm -rf "$staging"
     return 1
   fi
-  run mkdir -p "$GAME_DIR"
-  if [ "$DRY_RUN" != 1 ]; then
-    local from=$staging
-    [ -d "$staging/app" ] && from=$staging/app
-    cp -a "$from"/. "$GAME_DIR"/ || die "Could not copy the game into $GAME_DIR."
-    rm -rf "$staging"
-    GAME_EXE=$(find_game_exe "$GAME_DIR")
-    [ -n "$GAME_EXE" ] || { warn "The unpacked files have no FF7 executable; the installer will be run instead."; return 1; }
-  else
+  if [ "$DRY_RUN" = 1 ]; then
     GAME_EXE=$GAME_DIR/FFVII.exe
+  else
+    move_unpacked_game "$staging" || return 1
   fi
   SOURCE_KIND=folder
   ok "Unpacked to $GAME_DIR"
+}
+
+# move_unpacked_game STAGING - innoextract strips {app}, so the game lands at the top of STAGING, while
+# GOG's own support files (goggame-*.ico, webcache.zip) land in app/. Like DroidDeck's GOG store, the
+# two are merged into GAME_DIR, and the folders for other Windows locations (tmp, ...) are left out.
+move_unpacked_game() {
+  local staging=$1 exe root entry
+  exe=$(find_game_exe "$staging")
+  if [ -z "$exe" ]; then
+    warn "The unpacked files have no FF7 executable; the installer will be run instead."
+    debug "Unpacked files:"$'\n'"$(cd "$staging" && find . -maxdepth 2 | sort | head -n 60)"
+    debug "Installer contents:"$'\n'"$("$INNOEXTRACT" --list "$GOG_SETUP" 2>&1 | head -n 40)"
+    rm -rf -- "$staging"
+    return 1
+  fi
+  root=$staging
+  [[ $exe == "$staging/app/"* ]] && root=$staging/app
+  mkdir -p "$GAME_DIR" || die "Could not create $GAME_DIR."
+  for entry in "$root"/* "$root"/.[!.]*; do
+    [ -e "$entry" ] || continue
+    if [ "$root" = "$staging" ]; then
+      case ${entry##*/} in app|tmp|commonappdata|userappdata|localappdata) continue ;; esac
+    fi
+    rm -rf -- "${GAME_DIR:?}/${entry##*/}"
+    mv -- "$entry" "$GAME_DIR/" || die "Could not move the game into $GAME_DIR."
+  done
+  if [ "$root" = "$staging" ] && [ -d "$staging/app" ]; then
+    for entry in "$staging"/app/* "$staging"/app/.[!.]*; do
+      [ -e "$entry" ] && [ ! -e "$GAME_DIR/${entry##*/}" ] && mv -- "$entry" "$GAME_DIR/"
+    done
+  fi
+  rm -rf -- "$staging"
+  GAME_EXE=$(find_game_exe "$GAME_DIR")
+  [ -n "$GAME_EXE" ] || die "The game was unpacked, but no FF7 executable is in $GAME_DIR."
 }
 
 # Wine CD drives for the discs: d:, e:, f:, each with the label FF7 checks for.

@@ -9,10 +9,21 @@ declare -A DOTNET_KNOWN=([9.0]=9.0.22 [10.0]=10.0.14)
 LIB_DIR=${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 
 # dotnet_installed COMPATDATA x64|x86 MAJOR.MINOR
+# DroidDeck-Proton prefixes are ARM64 Windows, where the x64 runtime installs to dotnet\x64.
 dotnet_installed() {
-  local drive=$1/pfx/drive_c folder
-  [ "$2" = x64 ] && folder="Program Files" || folder="Program Files (x86)"
-  compgen -G "$drive/$folder/dotnet/shared/Microsoft.WindowsDesktop.App/$3.*" >/dev/null
+  local drive=$1/pfx/drive_c root roots
+  if [ "$2" = x64 ]; then
+    roots=("$drive/Program Files/dotnet/x64" "$drive/Program Files/dotnet")
+  else
+    roots=("$drive/Program Files (x86)/dotnet")
+  fi
+  for root in "${roots[@]}"; do
+    if compgen -G "$root/shared/Microsoft.WindowsDesktop.App/$3.*" >/dev/null; then
+      debug ".NET Desktop $3 ($2) found in $root"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # dotnet_version MAJOR.MINOR -> the newest Windows Desktop runtime of that channel
