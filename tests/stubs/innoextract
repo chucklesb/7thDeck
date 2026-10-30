@@ -1,0 +1,19 @@
+#!/bin/bash
+# Stands in for droiddeck-innoextract: lays out what it extracts from FF7's GOG installer. The game is
+# at the top ({app} stripped), GOG's support files in app/, and a tmp/ folder. STUB_INNO_LAYOUT=app
+# puts the game under app/ instead; STUB_INNO_LAYOUT=empty extracts no game.
+dest='' list=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -d) dest=$2; shift ;;
+    --list) list=1 ;;
+  esac
+  shift
+done
+[ "$list" = 1 ] && { echo " - \"FFVII.exe\""; exit 0; }
+[ -n "$dest" ] || exit 1
+game=$dest
+[ "${STUB_INNO_LAYOUT:-}" = app ] && game=$dest/app
+mkdir -p "$dest/app" "$dest/tmp" "$game/data"
+touch "$dest/app/goggame-1698970154.ico" "$dest/app/webcache.zip" "$dest/tmp/__redist.exe"
+[ "${STUB_INNO_LAYOUT:-}" = empty ] || touch "$game/FFVII.exe" "$game/data/movies.lgp"

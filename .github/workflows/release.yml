@@ -23,7 +23,7 @@ jobs:
           path: droiddeck
           sparse-checkout: tools/linuxfs/overlay/usr/local/bin
       - name: Lint
-        run: shellcheck -x install.sh menu.sh packaging/AppRun tests/test_install.sh tests/stubs/droiddeck-proton-run tests/stubs/zenity && shellcheck -s sh packaging/build-appimage.sh packaging/zenity
+        run: shellcheck -x install.sh menu.sh packaging/AppRun tests/test_install.sh tests/stubs/droiddeck-proton-run tests/stubs/zenity tests/stubs/innoextract && shellcheck -s sh packaging/build-appimage.sh packaging/zenity
       - name: Unit tests
         run: DROIDDECK_SRC=$PWD/droiddeck python3 -m unittest discover -s tests
       - name: Installer tests
